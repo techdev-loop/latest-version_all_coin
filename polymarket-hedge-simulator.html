@@ -1,0 +1,1057 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Polymarket Hedge Bot — Browser Simulator</title>
+    <style>
+        body {
+            font-family: system-ui, sans-serif;
+            max-width: 820px;
+            margin: 1rem auto;
+            padding: 0 1rem;
+            line-height: 1.45;
+        }
+
+        h2 {
+            margin-bottom: 0.35rem;
+        }
+
+        label {
+            display: block;
+            margin-top: 0.75rem;
+            font-weight: 600;
+        }
+
+        input,
+        textarea,
+        select {
+            width: 100%;
+            max-width: 44rem;
+            padding: 0.35rem 0.5rem;
+            margin-top: 0.25rem;
+            box-sizing: border-box;
+        }
+
+        textarea {
+            min-height: 7rem;
+            font-family: ui-monospace, monospace;
+            font-size: 0.85rem;
+        }
+
+        button {
+            margin-top: 1rem;
+            margin-right: 0.5rem;
+            padding: 0.5rem 1rem;
+            cursor: pointer;
+        }
+
+        #hint {
+            color: #444;
+            font-size: 0.9rem;
+            margin-top: 1rem;
+        }
+
+        .note {
+            color: #555;
+            font-size: 0.9rem;
+        }
+
+        pre.inline {
+            background: #f4f4f4;
+            padding: 0.5rem 0.75rem;
+            overflow: auto;
+            font-size: 0.8rem;
+        }
+    </style>
+</head>
+
+<body>
+    <h2>Polymarket Hedge Bot — Browser Simulator</h2>
+    <p class="note">
+        Mirrors the <strong>paper backtest loop</strong> in <code>src/scripts/simulateBacktest.ts</code>
+        (synthetic order books + <code>hedgeStrategy.decide</code> + maker fills). Open <strong>DevTools →
+            Console</strong> (F12) for full logs. Long runs yield to the event loop in chunks so the tab stays
+        responsive.
+    </p>
+
+    <label for="seedField">RNG seed (string — same seed ⇒ same synthetic books)</label>
+    <input type="text" id="seedField" spellcheck="false" value="polymarket-sim-demo-001" />
+
+    <label for="windowsField">Number of windows</label>
+    <input type="number" id="windowsField" min="1" step="1" value="50" />
+
+    <label for="ticksField">Ticks per window</label>
+    <input type="number" id="ticksField" min="5" step="1" value="30" />
+
+    <label for="chunkField">Yield every N ticks (UI chunk size)</label>
+    <input type="number" id="chunkField" min="1" step="1" value="5" />
+
+    <label for="windowMinutesField">Window length</label>
+    <select id="windowMinutesField">
+        <option value="15" selected>15 minutes (matches default backtest)</option>
+        <option value="5">5 minutes</option>
+    </select>
+
+    <p class="note"><strong>Optional — replay saved quotes</strong> (overrides synthetic books). Paste a JSON array of
+        ticks; each element may be <code>{ "yesAsk", "noAsk" }</code> or include bids:
+        <code>{ "yesBid", "noBid", "yesAsk", "noAsk" }</code>. One object = one tick; shorter arrays repeat last tick.
+    </p>
+    <textarea id="historyJsonField"
+        placeholder='e.g. [{"yesAsk":0.52,"noAsk":0.49},{"yesAsk":0.51,"noAsk":0.48}]'></textarea>
+
+    <button id="runSyntheticBtn" type="button">Run synthetic simulation</button>
+    <button id="runHistoryBtn" type="button">Run from pasted JSON</button>
+    <p id="hint"></p>
+
+    <p class="note">
+        In the console you can call <code>PolymarketSim.runSynthetic()</code> or inspect
+        <code>PolymarketSim.lastSummary</code> after a run.
+    </p>
+
+    <script>
+        (function () {
+            const CHUNK_DEFAULT = 5;
+            const SETTLEMENT_PNL_EPS = 1e-6;
+            const LADDER_QTY_EPS = 1e-8;
+            const Z_EPS = 1e-8;
+            const QTY_EPS = 1e-8;
+            const P_CLAMP = 1e-9;
+
+            /** Default matches {@link simulateBacktest.ts} inline config (expand as needed). */
+            function defaultConfig() {
+                return {
+                    btcMarketWindowMinutes: 15,
+                    targetPairCostMax: 0.98,
+                    safetyMargin: 0.97,
+                    strictMaxPairCostInclusive: 0.98,
+                    maxPositionPerWindowUsd: 500,
+                    orderSizeShares: 10,
+                    orderMinSize: 5,
+                    tickSize: 0.01,
+                    pollIntervalMs: 5000,
+                    stopTradingSecondsBeforeEnd: 0,
+                    marketSlugs: ['btc', '15'],
+                    liveTrading: false,
+                    killSwitch: false,
+                    circuitBreakerFailures: 5,
+                    feeBips: 20,
+                    binaryOutcomeTakerFeeScalar: 0,
+                    marketTiltEpsilon: 0.02,
+                    pairTiltImbalanceShares: 10,
+                    pairTiltMinElapsedSeconds: 0,
+                    windowEntryWarmupSeconds: 0,
+                    maxClipShares: 54,
+                    sizeLadderShares: [2, 8, 20, 35, 54],
+                    forcedSwitchEveryNOrders: 4,
+                    maxSingleOrderUsd: 50,
+                    directionalSkewEnabled: false,
+                    pairLadderMatchEnabled: false,
+                    dualOutcomePurchasePriority: true,
+                    minDualAfterPnlUsd: 0.7,
+                    minDualAfterPnlStrictAbove: false,
+                    finalOneSidedHedgeSeconds: 30,
+                    absoluteNoOrderSeconds: 2,
+                    paperStartingBalanceUsd: 5000,
+                };
+            }
+
+            function btcWindowDurationSec(config) {
+                return config.btcMarketWindowMinutes === 5 ? 300 : 900;
+            }
+
+            function hashSeed(str) {
+                let h = 2166136261;
+                for (let i = 0; i < str.length; i++) {
+                    h ^= str.charCodeAt(i);
+                    h = Math.imul(h, 16777619);
+                }
+                return h >>> 0;
+            }
+
+            function mulberry32(seed) {
+                return function () {
+                    let t = (seed += 0x6d2b79f5);
+                    t = Math.imul(t ^ (t >>> 15), t | 1);
+                    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+                    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+                };
+            }
+
+            function polymarketBinaryTakerFeeUsd(shares, price, feeRate) {
+                const C = Math.floor(Math.max(0, shares) + 1e-12);
+                if (C <= 0 || !(feeRate > 0) || !Number.isFinite(feeRate)) return 0;
+                const p = Math.min(Math.max(price, P_CLAMP), 1 - P_CLAMP);
+                if (!Number.isFinite(p)) return 0;
+                return C * feeRate * p * (1 - p);
+            }
+
+            function buyBinaryOutcomeLegUsd(shares, rawPricePerShare, liquidity, feeBips, feeScalar) {
+                const sh = Math.floor(Math.max(0, shares) + 1e-12);
+                if (sh <= 0 || !Number.isFinite(rawPricePerShare)) return 0;
+                const p = Math.min(Math.max(rawPricePerShare, P_CLAMP), 1 - P_CLAMP);
+                const notional = sh * p;
+                if (liquidity === 'MAKER') return notional;
+                if (feeScalar > 0 && Number.isFinite(feeScalar)) return sh * (p + feeScalar * p * (1 - p));
+                const feeRate = (feeBips ?? 0) / 10000;
+                return notional + polymarketBinaryTakerFeeUsd(sh, rawPricePerShare, feeRate);
+            }
+
+            function takerCommissionUsdForBinaryBuy(shares, rawPricePerShare, liquidity, feeBips, feeScalar) {
+                if (liquidity === 'MAKER') return 0;
+                const sh = Math.floor(Math.max(0, shares) + 1e-12);
+                if (sh <= 0 || !Number.isFinite(rawPricePerShare)) return 0;
+                if (feeScalar > 0 && Number.isFinite(feeScalar)) return polymarketBinaryTakerFeeUsd(sh, rawPricePerShare, feeScalar);
+                const feeRate = (feeBips ?? 0) / 10000;
+                return polymarketBinaryTakerFeeUsd(sh, rawPricePerShare, feeRate);
+            }
+
+            function sumPaperRecordedTakerFeesUsd(orders, feeBips) {
+                const feeRate = feeBips / 10000;
+                let sum = 0;
+                for (const o of orders) {
+                    if (o.liquidity === 'TAKER') sum += polymarketBinaryTakerFeeUsd(o.size, o.price, feeRate);
+                }
+                return sum;
+            }
+
+            function createEmptyWindowState(marketSlug, conditionId, windowEndIso) {
+                return {
+                    marketSlug,
+                    conditionId,
+                    windowEndIso,
+                    qtyYes: 0,
+                    qtyNo: 0,
+                    costYes: 0,
+                    costNo: 0,
+                    avgYes: 0,
+                    avgNo: 0,
+                    pairCost: 0,
+                    lockedProfit: 0,
+                    totalSpentUsd: 0,
+                    takerCommissionPaidUsd: 0,
+                    lastUpdated: new Date().toISOString(),
+                };
+            }
+
+            function recomputeWindowDerivedFields(state) {
+                const newState = Object.assign({}, state);
+                newState.avgYes = newState.qtyYes > 0 ? newState.costYes / newState.qtyYes : 0;
+                newState.avgNo = newState.qtyNo > 0 ? newState.costNo / newState.qtyNo : 0;
+                if (newState.qtyYes > 0 && newState.qtyNo > 0) newState.pairCost = newState.avgYes + newState.avgNo;
+                else if (newState.qtyYes > 0) newState.pairCost = newState.avgYes;
+                else if (newState.qtyNo > 0) newState.pairCost = newState.avgNo;
+                else newState.pairCost = 0;
+                newState.totalSpentUsd = newState.costYes + newState.costNo;
+                if (newState.takerCommissionPaidUsd == null || !Number.isFinite(newState.takerCommissionPaidUsd))
+                    newState.takerCommissionPaidUsd = 0;
+                const minQty = Math.min(newState.qtyYes, newState.qtyNo);
+                if (minQty > 0 && newState.avgYes > 0 && newState.avgNo > 0) {
+                    const matchedCost = minQty * newState.avgYes + minQty * newState.avgNo;
+                    newState.lockedProfit = minQty - matchedCost;
+                } else newState.lockedProfit = 0;
+                newState.lastUpdated = new Date().toISOString();
+                return newState;
+            }
+
+            function updateWindowStateFromFill(state, side, addedQty, addedCost, opts) {
+                const rawQ = Math.max(0, addedQty);
+                const dq = Math.floor(rawQ + 1e-9);
+                const costScale = rawQ > 1e-12 ? Math.min(1, dq / rawQ) : 1;
+                const dc = addedCost * costScale;
+                const newState = Object.assign({}, state);
+                if (side === 'YES') {
+                    newState.qtyYes = state.qtyYes + dq;
+                    newState.costYes = state.costYes + dc;
+                } else {
+                    newState.qtyNo = state.qtyNo + dq;
+                    newState.costNo = state.costNo + dc;
+                }
+                const addFee = opts && opts.takerCommissionUsd;
+                if (addFee != null && Number.isFinite(addFee) && addFee > 0) {
+                    newState.takerCommissionPaidUsd = (state.takerCommissionPaidUsd ?? 0) + addFee * costScale;
+                }
+                return recomputeWindowDerivedFields(newState);
+            }
+
+            function pairCostCeiling(config) {
+                const hard = config.strictMaxPairCostInclusive ?? 0.98;
+                return Math.min(hard, config.safetyMargin, config.targetPairCostMax);
+            }
+
+            function binaryOutcomeBuyAllInPerShare(price, feeScalar) {
+                if (!(feeScalar > 0) || !Number.isFinite(feeScalar)) return price;
+                const p = Math.min(Math.max(price, P_CLAMP), 1 - P_CLAMP);
+                return p + feeScalar * p * (1 - p);
+            }
+
+            function oppositeAskAllInForSide(side, bookYes, bookNo, config) {
+                const raw = side === 'YES' ? bookNo.bestAsk : bookYes.bestAsk;
+                if (raw === undefined || !(raw > 0) || !(raw < 1)) return undefined;
+                const feeBips = config.feeBips ?? 0;
+                const feeScalar = config.binaryOutcomeTakerFeeScalar ?? 0;
+                return buyBinaryOutcomeLegUsd(1, raw, 'TAKER', feeBips, feeScalar);
+            }
+
+            function legEffPerShare(rawPx, config, liq) {
+                const feeBips = config.feeBips ?? 0;
+                const feeScalar = config.binaryOutcomeTakerFeeScalar ?? 0;
+                return buyBinaryOutcomeLegUsd(1, rawPx, liq ?? 'MAKER', feeBips, feeScalar);
+            }
+
+            function minDualAfterPnlUsd(config) {
+                const v = config.minDualAfterPnlUsd;
+                return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : 0.7;
+            }
+
+            function minDualAfterPnlStrictAbove(config) {
+                return config.minDualAfterPnlStrictAbove === true;
+            }
+
+            function effectiveMinDualForSlackUsd(config) {
+                const base = minDualAfterPnlUsd(config);
+                return minDualAfterPnlStrictAbove(config) ? base + 1e-4 : base;
+            }
+
+            function dualAfterPnlMeetsMin(afterUp, afterDown, minD, strictAbove) {
+                if (strictAbove) return afterUp > minD && afterDown > minD;
+                return afterUp >= minD - SETTLEMENT_PNL_EPS && afterDown >= minD - SETTLEMENT_PNL_EPS;
+            }
+
+            function afterPnlsFromState(state) {
+                const spent = state.totalSpentUsd;
+                const fee = state.takerCommissionPaidUsd ?? 0;
+                const notional = spent - fee;
+                return {
+                    afterPnlIfUp: state.qtyYes - spent,
+                    afterPnlIfDown: state.qtyNo - spent,
+                    afterPnlIfUpExcludingCommission: state.qtyYes - notional,
+                    afterPnlIfDownExcludingCommission: state.qtyNo - notional,
+                    notionalSpentUsd: notional,
+                    takerCommissionPaidUsd: fee,
+                };
+            }
+
+            function requiresMinDualAfterPnlForSimulatedBuy(state, side) {
+                const z = LADDER_QTY_EPS;
+                const y = state.qtyYes;
+                const n = state.qtyNo;
+                if (y <= z && n <= z) return false;
+                if (y > z && n <= z) return side === 'NO';
+                if (n > z && y <= z) return side === 'YES';
+                if (Math.abs(y - n) <= z) return false;
+                if (y < n) return side === 'YES';
+                return side === 'NO';
+            }
+
+            function completingOneSidedHedgeLeg(state, side) {
+                const z = LADDER_QTY_EPS;
+                const y = state.qtyYes;
+                const n = state.qtyNo;
+                if (y > z && n <= z) return side === 'NO';
+                if (n > z && y <= z) return side === 'YES';
+                return false;
+            }
+
+            function violatesDualLegSettlementGate(s, minAfterPnlUsd, strictAbove) {
+                if (s.qtyYes <= 0 || s.qtyNo <= 0) return false;
+                const ap = afterPnlsFromState(s);
+                const up = ap.afterPnlIfUp;
+                const down = ap.afterPnlIfDown;
+                if (up < SETTLEMENT_PNL_EPS || down < SETTLEMENT_PNL_EPS) return true;
+                if (minAfterPnlUsd > 0) {
+                    if (strictAbove) {
+                        if (up <= minAfterPnlUsd || down <= minAfterPnlUsd) return true;
+                    } else if (up < minAfterPnlUsd || down < minAfterPnlUsd) return true;
+                }
+                return false;
+            }
+
+            function projectedAfterPnlsAfterBuy(state, side, shares, rawUnitPrice, config, fillLiquidity) {
+                const addedCost = buyBinaryOutcomeLegUsd(shares, rawUnitPrice, fillLiquidity, config.feeBips ?? 0, config.binaryOutcomeTakerFeeScalar ?? 0);
+                const takerCommissionUsd = takerCommissionUsdForBinaryBuy(shares, rawUnitPrice, fillLiquidity, config.feeBips ?? 0, config.binaryOutcomeTakerFeeScalar ?? 0);
+                const newState = updateWindowStateFromFill(state, side, shares, addedCost, { takerCommissionUsd });
+                const ap = afterPnlsFromState(newState);
+                return { afterPnlIfUp: ap.afterPnlIfUp, afterPnlIfDown: ap.afterPnlIfDown, newState };
+            }
+
+            function simulateState(state, side, deltaQty, rawPrice, config, fillLiquidity) {
+                const addedCost = buyBinaryOutcomeLegUsd(deltaQty, rawPrice, fillLiquidity, config.feeBips ?? 0, config.binaryOutcomeTakerFeeScalar ?? 0);
+                const comm = takerCommissionUsdForBinaryBuy(deltaQty, rawPrice, fillLiquidity, config.feeBips ?? 0, config.binaryOutcomeTakerFeeScalar ?? 0);
+                const newState = updateWindowStateFromFill(state, side, deltaQty, addedCost, { takerCommissionUsd: comm });
+                return { newPairCost: newState.pairCost, newState };
+            }
+
+            function capClipByAfterPnlSlack(state, side, price, shares, orderMinSize, minAfterPnlUsd) {
+                if (price <= 0 || !Number.isFinite(price)) return shares;
+                const y = state.qtyYes;
+                const n = state.qtyNo;
+                const S = state.totalSpentUsd;
+                if (y <= 0 || n <= 0) return shares;
+                const slackUsd = side === 'YES' ? n - S - minAfterPnlUsd : y - S - minAfterPnlUsd;
+                const maxS = Math.floor(Math.max(0, slackUsd) / price + 1e-9);
+                if (maxS < orderMinSize) return 0;
+                return Math.min(shares, maxS);
+            }
+
+            function effectiveWarmupSeconds(config, windowSec) {
+                const cap = Math.max(8, Math.floor(windowSec * 0.35));
+                const w =
+                    config.windowEntryWarmupSeconds !== undefined && config.windowEntryWarmupSeconds !== null
+                        ? config.windowEntryWarmupSeconds
+                        : config.pairTiltMinElapsedSeconds ?? 0;
+                const raw = Math.max(0, Math.floor(w));
+                return Math.min(raw, cap);
+            }
+
+            function buildSizeLadderFromConfig(config) {
+                const configured = (config.sizeLadderShares || [])
+                    .map((v) => Math.max(0, Math.floor(v)))
+                    .filter((v) => v > 0);
+                const fallback = [2, 8, 20, 35, Math.floor(config.maxClipShares ?? 54)];
+                const base = (configured.length > 0 ? configured : fallback).sort((a, b) => a - b);
+                const unique = [];
+                for (const s of base) if (unique.length === 0 || unique[unique.length - 1] !== s) unique.push(s);
+                return unique;
+            }
+
+            function referencePickBuySide(state, bestBidYes, bestBidNo, roundsThisWindow, lastExecutedSide, config, ctx) {
+                const eps = config.marketTiltEpsilon ?? 0.02;
+                const imbTh = config.pairTiltImbalanceShares ?? 10;
+                const G = state.qtyYes - state.qtyNo;
+                let side;
+                let reason = 'CHEAPER_BID_FALLBACK';
+                let forcedSwitchApplied = false;
+
+                const secondsLeft = ctx && ctx.secondsLeft;
+                const windowSec = ctx && ctx.windowSec;
+                if (
+                    typeof secondsLeft === 'number' &&
+                    typeof windowSec === 'number' &&
+                    secondsLeft <= Math.max(15, Math.min(config.stopTradingSecondsBeforeEnd ?? 120, Math.floor(windowSec * 0.5))) &&
+                    state.qtyYes !== state.qtyNo
+                ) {
+                    side = G < 0 ? 'YES' : 'NO';
+                    return { side, reason: 'PARITY_REBALANCE', imbalanceShares: G, marketTilt: bestBidYes - bestBidNo, forcedSwitchApplied: false };
+                }
+
+                if (Math.abs(G) >= imbTh) {
+                    side = G < 0 ? 'YES' : 'NO';
+                    reason = 'INVENTORY_IMBALANCE';
+                } else {
+                    const upTilt = bestBidYes > bestBidNo + eps;
+                    const downTilt = bestBidNo > bestBidYes + eps;
+                    if (upTilt && !downTilt) {
+                        side = 'YES';
+                        reason = 'MARKET_TILT';
+                    } else if (downTilt && !upTilt) {
+                        side = 'NO';
+                        reason = 'MARKET_TILT';
+                    } else {
+                        side = bestBidYes <= bestBidNo ? 'YES' : 'NO';
+                        reason = 'CHEAPER_BID_FALLBACK';
+                    }
+                }
+
+                const switchEvery = config.forcedSwitchEveryNOrders ?? 4;
+                if (switchEvery > 0 && roundsThisWindow > 0 && roundsThisWindow % switchEvery === 0 && lastExecutedSide && Math.abs(G) < imbTh) {
+                    side = lastExecutedSide === 'YES' ? 'NO' : 'YES';
+                    reason = 'FORCED_SWITCH';
+                    forcedSwitchApplied = true;
+                }
+                return { side, reason, imbalanceShares: G, marketTilt: bestBidYes - bestBidNo, forcedSwitchApplied };
+            }
+
+            function capClipForSettlementQtyParity(state, side, shares, orderMinSize, opts) {
+                const y = state.qtyYes;
+                const n = state.qtyNo;
+                const G = y - n;
+                const extra = Math.max(0, Math.floor((opts && opts.firstOppositeLegExtraShares) ?? 0));
+
+                let maxAdd = Infinity;
+                if (y <= 0 && n <= 0) maxAdd = Infinity;
+                else if (y > 0 && n <= 0) maxAdd = side === 'NO' ? Math.floor(y) + extra : 0;
+                else if (n > 0 && y <= 0) maxAdd = side === 'YES' ? Math.floor(n) + extra : 0;
+                else {
+                    if (G === 0) maxAdd = Infinity;
+                    else if (side === 'YES') maxAdd = G < 0 ? Math.floor(-G) : 0;
+                    else maxAdd = G > 0 ? Math.floor(G) : 0;
+                }
+
+                if (!Number.isFinite(maxAdd) || maxAdd >= shares) return shares;
+
+                let capped = Math.min(shares, maxAdd);
+                if (capped <= 0) return 0;
+                if (capped < orderMinSize) {
+                    if (maxAdd > 0) return Math.min(shares, orderMinSize);
+                    return 0;
+                }
+                return capped;
+            }
+
+            function referencePickClipSize(state, currentBid, secondsLeft, windowSec, config, ladder, opts) {
+                const maxClip = Math.max(1, Math.floor(config.maxClipShares ?? 54));
+                const remainingBudget = Math.max(0, config.maxPositionPerWindowUsd - state.totalSpentUsd);
+                const maxByBudget = currentBid > 0 ? Math.floor(remainingBudget / currentBid) : 0;
+
+                let shareCapFromUsd = null;
+                if (currentBid > 0 && config.maxSingleOrderUsd != null && config.maxSingleOrderUsd > 0) {
+                    shareCapFromUsd = Math.floor(config.maxSingleOrderUsd / currentBid);
+                }
+                const bal = opts && opts.availableBalanceUsd;
+                const frac = config.orderSpendBalanceFraction;
+                if (currentBid > 0 && bal != null && bal > 0 && frac != null && frac > 0) {
+                    const fromBal = Math.floor((bal * frac) / currentBid);
+                    shareCapFromUsd = shareCapFromUsd != null ? Math.min(shareCapFromUsd, fromBal) : fromBal;
+                }
+                const maxBySingleOrder = shareCapFromUsd != null ? shareCapFromUsd : maxClip;
+
+                const hardCap = Math.max(0, Math.min(maxClip, maxByBudget, maxBySingleOrder));
+                if (hardCap <= 0) return 0;
+
+                const elapsed = Math.max(0, windowSec - secondsLeft);
+                const warmup = effectiveWarmupSeconds(config, windowSec);
+                const rampFrac = config.clipRampExtraFraction ?? 0.08;
+                const tailFrac = config.clipTailFraction ?? 0.15;
+                const rampEnd = warmup + Math.floor(windowSec * rampFrac);
+                const tailSec = Math.max(20, Math.floor(windowSec * tailFrac));
+                const big = ladder[Math.max(0, ladder.length - 1)] ?? maxClip;
+                const small = ladder[0] ?? 5;
+                const mid = ladder[Math.floor(Math.max(0, ladder.length - 1) / 2)] ?? Math.floor((small + big) / 2);
+
+                let pick;
+                if (elapsed < rampEnd) pick = mid;
+                else if (secondsLeft > tailSec) pick = big;
+                else pick = Math.max(small, Math.floor(big * 0.65));
+
+                let shares = Math.min(hardCap, pick);
+                if (currentBid > 0 && shares * currentBid < 1.0) shares = Math.max(shares, Math.ceil(1.0 / currentBid));
+                return Math.min(shares, hardCap);
+            }
+
+            function inStopTradingSecondsBeforeEndWindow(secondsLeft, stopTradingSecondsBeforeEnd) {
+                return stopTradingSecondsBeforeEnd > 0 && secondsLeft <= stopTradingSecondsBeforeEnd;
+            }
+
+            function roundToTick(price, tickSize) {
+                if (tickSize <= 0) return price;
+                return Math.round(price / tickSize) * tickSize;
+            }
+
+            function defaultSecondsLeftForDemo(config) {
+                return Math.floor(btcWindowDurationSec(config) / 2);
+            }
+
+            function clampBuySizeForSimulatedGates(state, side, price, initialSize, config, opts) {
+                const minSize = Math.max(1, Math.floor(config.orderMinSize || 1));
+                const CLOB_MIN_ORDER_USD = 1.0;
+                let s = Math.floor(initialSize);
+                const liq = (opts && opts.simulatedFillLiquidity) || 'MAKER';
+                const feeBips = config.feeBips ?? 0;
+                const feeScalar = config.binaryOutcomeTakerFeeScalar ?? 0;
+
+                const impliedOppositePerShareForEmptyBook = () => {
+                    const oppAsk = opts && opts.oppositeAskAllInForFirstLegGate;
+                    const oppBidRaw = opts && opts.oppositeBidForFirstLegGate;
+                    if (liq === 'MAKER' && oppBidRaw != null && oppBidRaw > 0 && Number.isFinite(oppBidRaw)) {
+                        return buyBinaryOutcomeLegUsd(1, oppBidRaw, 'MAKER', feeBips, feeScalar);
+                    }
+                    return oppAsk;
+                };
+
+                if (opts && opts.bypassPairCostAndSettlement) {
+                    while (s >= minSize) {
+                        if (price * s < CLOB_MIN_ORDER_USD) {
+                            s--;
+                            continue;
+                        }
+                        return s;
+                    }
+                    return 0;
+                }
+
+                const dualPriority = config.dualOutcomePurchasePriority !== false;
+                const pairCeil = pairCostCeiling(config);
+                const minD = minDualAfterPnlUsd(config);
+                const strictAbove = minDualAfterPnlStrictAbove(config);
+                const enforceDual = (opts && opts.forceDualAfterPnlEnforcement === true) || requiresMinDualAfterPnlForSimulatedBuy(state, side);
+
+                const z0 = 1e-8;
+                const y0 = state.qtyYes;
+                const n0 = state.qtyNo;
+                const oneSidedBefore = (y0 > z0 && n0 <= z0) || (n0 > z0 && y0 <= z0);
+                const applyPairCost =
+                    (opts && opts.forceDualAfterPnlEnforcement === true) || completingOneSidedHedgeLeg(state, side) || (enforceDual && !oneSidedBefore);
+
+                while (s >= minSize) {
+                    if (price * s < CLOB_MIN_ORDER_USD) {
+                        s--;
+                        continue;
+                    }
+                    const addedCost = buyBinaryOutcomeLegUsd(s, price, liq, feeBips, feeScalar);
+                    const commFill = takerCommissionUsdForBinaryBuy(s, price, liq, feeBips, feeScalar);
+                    const newState = updateWindowStateFromFill(state, side, s, addedCost, { takerCommissionUsd: commFill });
+                    const z = 1e-8;
+                    const emptyBefore = state.qtyYes <= z && state.qtyNo <= z;
+                    const both = newState.qtyYes > 0 && newState.qtyNo > 0;
+                    if (!both) {
+                        if (emptyBefore) {
+                            if (applyPairCost) {
+                                const oppImplied = impliedOppositePerShareForEmptyBook();
+                                const ladder = config.pairLadderMatchEnabled === true;
+                                if (ladder) {
+                                    if (oppImplied == null || !(oppImplied > 0) || !Number.isFinite(oppImplied)) {
+                                        s--;
+                                        continue;
+                                    }
+                                    if (legEffPerShare(price, config, liq) + oppImplied > pairCeil + 1e-9) {
+                                        s--;
+                                        continue;
+                                    }
+                                } else if (oppImplied != null && oppImplied > 0 && Number.isFinite(oppImplied)) {
+                                    if (legEffPerShare(price, config, liq) + oppImplied > pairCeil + 1e-9) {
+                                        s--;
+                                        continue;
+                                    }
+                                }
+                            }
+                            return s;
+                        }
+                        if (!enforceDual) return s;
+                        s--;
+                        continue;
+                    }
+
+                    const apSim = afterPnlsFromState(newState);
+                    const afterUp = apSim.afterPnlIfUp;
+                    const afterDown = apSim.afterPnlIfDown;
+
+                    if (enforceDual) {
+                        const dualOk = dualAfterPnlMeetsMin(
+                            apSim.afterPnlIfUpExcludingCommission,
+                            apSim.afterPnlIfDownExcludingCommission,
+                            minD,
+                            strictAbove
+                        );
+                        const settlementBad = violatesDualLegSettlementGate(newState, minD, strictAbove);
+                        const pairAboveCeiling = newState.pairCost > pairCeil + 1e-9;
+                        const pairAtOrAboveDollar = newState.pairCost >= 1.0 - 1e-9;
+
+                        if (dualPriority && dualOk && !settlementBad && (!applyPairCost || (!pairAboveCeiling && !pairAtOrAboveDollar))) {
+                            return s;
+                        }
+
+                        if (applyPairCost && (pairAboveCeiling || pairAtOrAboveDollar)) {
+                            s--;
+                            continue;
+                        }
+
+                        if (settlementBad) {
+                            s--;
+                            continue;
+                        }
+                        if (dualPriority && !dualOk) {
+                            s--;
+                            continue;
+                        }
+                        return s;
+                    }
+
+                    if (!completingOneSidedHedgeLeg(state, side) || newState.pairCost <= pairCeil + 1e-9) {
+                        return s;
+                    }
+                    s--;
+                }
+                return 0;
+            }
+
+            function buildFinalOneSidedHedgeDecision(config, state, bookYes, bookNo, secondsLeft, ctx) {
+                const absCut = config.absoluteNoOrderSeconds ?? 2;
+                const finalSec = config.finalOneSidedHedgeSeconds ?? 30;
+                if (secondsLeft <= absCut) return null;
+                if (!(ctx && ctx.bypassFinalTimeWindow) && secondsLeft > finalSec) return null;
+
+                const yesOnly = state.qtyYes > QTY_EPS && state.qtyNo <= QTY_EPS;
+                const noOnly = state.qtyNo > QTY_EPS && state.qtyYes <= QTY_EPS;
+                if (!yesOnly && !noOnly) return null;
+
+                const side = yesOnly ? 'NO' : 'YES';
+                const sharesTarget = Math.floor(yesOnly ? state.qtyYes : state.qtyNo);
+                if (sharesTarget < 1) {
+                    return { action: 'HOLD', tokenId: '', price: 0, size: 0, reason: 'Final hedge: filled leg < 1 share' };
+                }
+
+                const tickSize = config.tickSize || 0.01;
+                const bestAskLevel = side === 'YES' ? bookYes.asks && bookYes.asks[0] : bookNo.asks && bookNo.asks[0];
+                if (!bestAskLevel || bestAskLevel.price <= 0) {
+                    return { action: 'HOLD', tokenId: '', price: 0, size: 0, reason: 'Final hedge: no ask on opposite leg' };
+                }
+                const price = roundToTick(bestAskLevel.price, tickSize);
+                const pairCeil = pairCostCeiling(config);
+
+                const minD = minDualAfterPnlUsd(config);
+                const strictAbove = minDualAfterPnlStrictAbove(config);
+                const minSize = Math.max(1, Math.floor(config.orderMinSize || 1));
+                const pairLadderOn = config.pairLadderMatchEnabled === true;
+                const cfgPairClipMin = Math.floor(pairLadderOn ? config.pairStockARandomSharesMin ?? 25 : 1);
+                const floorClip = pairLadderOn ? Math.max(minSize, cfgPairClipMin) : minSize;
+                let size = Math.max(sharesTarget, pairLadderOn ? floorClip : sharesTarget);
+                while (size >= floorClip) {
+                    const { newState } = projectedAfterPnlsAfterBuy(state, side, size, price, config, 'TAKER');
+                    const apFin = afterPnlsFromState(newState);
+                    if (
+                        newState.qtyYes > 0 &&
+                        newState.qtyNo > 0 &&
+                        dualAfterPnlMeetsMin(
+                            apFin.afterPnlIfUpExcludingCommission,
+                            apFin.afterPnlIfDownExcludingCommission,
+                            minD,
+                            strictAbove
+                        ) &&
+                        newState.pairCost < 1.0 - 1e-9 &&
+                        newState.pairCost <= pairCeil + 1e-9
+                    ) {
+                        const { newPairCost } = simulateState(state, side, size, price, config, 'TAKER');
+                        const tokenId = side === 'YES' ? bookYes.tokenId : bookNo.tokenId;
+                        const cmp = strictAbove ? '>' : '≥';
+                        return {
+                            action: side === 'YES' ? 'BUY_YES' : 'BUY_NO',
+                            tokenId,
+                            price,
+                            size,
+                            reason: `Final hedge: ${size} ${side} @ ask $${price.toFixed(2)} (both P/L ex-commission ${cmp} $${minD.toFixed(
+                                2
+                            )}; pairCost→${newPairCost.toFixed(4)}; ${secondsLeft}s left)`,
+                            simulatedPairCost: newPairCost,
+                        };
+                    }
+                    size--;
+                }
+
+                return {
+                    action: 'HOLD',
+                    tokenId: '',
+                    price: 0,
+                    size: 0,
+                    reason: `Final hedge: no size keeps dual P/L and pair ≤ ${pairCeil.toFixed(4)}`,
+                };
+            }
+
+            function decide(config, state, bookYes, bookNo, excludeSide, ctx) {
+                const tickSize = config.tickSize || 0.01;
+                const CLOB_MIN_ORDER_USD = 1.0;
+
+                const bestBidYes = bookYes.bids && bookYes.bids.length > 0 ? bookYes.bids[0] : undefined;
+                const bestBidNo = bookNo.bids && bookNo.bids.length > 0 ? bookNo.bids[0] : undefined;
+                const bestAskYes = bookYes.asks && bookYes.asks.length > 0 ? bookYes.asks[0] : undefined;
+                const bestAskNo = bookNo.asks && bookNo.asks.length > 0 ? bookNo.asks[0] : undefined;
+
+                if (!bestBidYes || !bestBidNo) {
+                    return { action: 'HOLD', tokenId: '', price: 0, size: 0, reason: 'No bid liquidity' };
+                }
+                if (!bestAskYes || !bestAskNo) {
+                    return { action: 'HOLD', tokenId: '', price: 0, size: 0, reason: 'No ask liquidity' };
+                }
+
+                const yesBidPrice = roundToTick(bestBidYes.price, tickSize);
+                const noBidPrice = roundToTick(bestBidNo.price, tickSize);
+                const yesAskPrice = roundToTick(bestAskYes.price, tickSize);
+                const noAskPrice = roundToTick(bestAskNo.price, tickSize);
+
+                if (yesBidPrice >= yesAskPrice || noBidPrice >= noAskPrice) {
+                    return { action: 'HOLD', tokenId: '', price: 0, size: 0, reason: 'Crossed book' };
+                }
+
+                const combined = yesBidPrice + noBidPrice;
+                const windowSec = btcWindowDurationSec(config);
+                const secondsLeft = (ctx && ctx.secondsLeft != null) ? ctx.secondsLeft : defaultSecondsLeftForDemo(config);
+                const elapsed = Math.max(0, windowSec - secondsLeft);
+                if (elapsed < effectiveWarmupSeconds(config, windowSec)) {
+                    return { action: 'HOLD', tokenId: '', price: 0, size: 0, reason: 'Warmup' };
+                }
+
+                const finalHedge = buildFinalOneSidedHedgeDecision(config, state, bookYes, bookNo, secondsLeft, {
+                    btcUsdDeltaFromWindowOpen: ctx && ctx.btcUsdDeltaFromWindowOpen,
+                });
+                if (finalHedge !== null && finalHedge.action !== 'HOLD') return finalHedge;
+
+                const rounds = (ctx && ctx.roundsThisWindow) ?? 0;
+                const lastSide = (ctx && ctx.lastExecutedSide) ?? null;
+
+                if (config.directionalSkewEnabled !== false) {
+                    /* Skew path omitted in browser build — set directionalSkewEnabled:false (default here). */
+                }
+
+                let side = referencePickBuySide(state, yesBidPrice, noBidPrice, rounds, lastSide, config, {
+                    secondsLeft,
+                    windowSec,
+                }).side;
+                if (excludeSide === side) side = side === 'YES' ? 'NO' : 'YES';
+
+                const price = side === 'YES' ? yesBidPrice : noBidPrice;
+                const tokenId = side === 'YES' ? bookYes.tokenId : bookNo.tokenId;
+                const ladder = buildSizeLadderFromConfig(config);
+                let size = referencePickClipSize(state, price, secondsLeft, windowSec, config, ladder, {
+                    availableBalanceUsd: ctx && ctx.availableBalanceUsd,
+                });
+                size = Math.max(size, config.orderMinSize || 1);
+                const minSz = Math.max(1, Math.floor(config.orderMinSize || 1));
+                const slackMin = requiresMinDualAfterPnlForSimulatedBuy(state, side) ? effectiveMinDualForSlackUsd(config) : 0;
+                size = capClipByAfterPnlSlack(state, side, price, size, minSz, slackMin);
+                if (state.qtyYes <= Z_EPS || state.qtyNo <= Z_EPS || requiresMinDualAfterPnlForSimulatedBuy(state, side)) {
+                    size = capClipForSettlementQtyParity(state, side, size, minSz);
+                }
+
+                const diff = Math.abs(state.qtyYes - state.qtyNo);
+                if (
+                    inStopTradingSecondsBeforeEndWindow(secondsLeft, config.stopTradingSecondsBeforeEnd) &&
+                    diff > 0 &&
+                    requiresMinDualAfterPnlForSimulatedBuy(state, side)
+                ) {
+                    size = Math.min(size, diff);
+                }
+
+                const emptyDecide = state.qtyYes <= Z_EPS && state.qtyNo <= Z_EPS;
+                const oppAskDecide = emptyDecide ? oppositeAskAllInForSide(side, bookYes, bookNo, config) : undefined;
+                const oppBidDecide = emptyDecide ? (side === 'YES' ? noBidPrice : yesBidPrice) : undefined;
+                size = clampBuySizeForSimulatedGates(state, side, price, size, config, {
+                    oppositeAskAllInForFirstLegGate: oppAskDecide,
+                    oppositeBidForFirstLegGate: oppBidDecide,
+                    simulatedFillLiquidity: 'MAKER',
+                });
+
+                if (size <= 0 || price * size < CLOB_MIN_ORDER_USD) {
+                    return { action: 'HOLD', tokenId: '', price: 0, size: 0, reason: 'No valid clip (gates)' };
+                }
+
+                const { newPairCost } = simulateState(state, side, size, price, config, 'MAKER');
+
+                return {
+                    action: side === 'YES' ? 'BUY_YES' : 'BUY_NO',
+                    tokenId,
+                    price,
+                    size,
+                    reason: `REFERENCE ${side} ${size}@${price.toFixed(4)} pairCost→${newPairCost.toFixed(4)} sum=${combined.toFixed(4)}`,
+                    simulatedPairCost: newPairCost,
+                };
+            }
+
+            function orderBookFromClob(tokenId, side, bids, asks) {
+                const toLevel = (p) => ({
+                    price: typeof p.price === 'string' ? parseFloat(p.price) : p.price,
+                    size: typeof p.size === 'string' ? parseFloat(p.size) : p.size,
+                });
+                const bidLevels = (bids || []).map(toLevel).filter((l) => l.price > 0 && l.size > 0);
+                const askLevels = (asks || []).map(toLevel).filter((l) => l.price > 0 && l.size > 0);
+                bidLevels.sort((a, b) => b.price - a.price);
+                askLevels.sort((a, b) => a.price - b.price);
+                return {
+                    tokenId,
+                    side,
+                    bids: bidLevels,
+                    asks: askLevels,
+                    bestBid: bidLevels.length > 0 ? bidLevels[0].price : undefined,
+                    bestAsk: askLevels.length > 0 ? askLevels[0].price : undefined,
+                };
+            }
+
+            function generateTickSynthetic(windowTick, totalTicks, rng, volatility) {
+                const vol = volatility == null ? 0.15 : volatility;
+                const swing1 = Math.sin(windowTick * 0.8) * vol;
+                const swing2 = Math.sin(windowTick * 1.7 + 1.2) * (vol * 0.5);
+                const noise = (rng() - 0.5) * 0.04;
+                const yesPrice = Math.max(0.1, Math.min(0.9, 0.5 + swing1 + swing2 + noise));
+                const spread = 0.01 + rng() * 0.03;
+                const noPrice = Math.max(0.1, Math.min(0.9, 1.0 - yesPrice + spread * (rng() > 0.5 ? 1 : -1)));
+                const yesAsk = Math.round(yesPrice * 100) / 100;
+                const noAsk = Math.round(noPrice * 100) / 100;
+                const yesLiq = 20 + Math.floor(rng() * 80);
+                const noLiq = 20 + Math.floor(rng() * 80);
+                const bookYes = orderBookFromClob('sim-yes-token', 'YES', [{ price: yesAsk - 0.01, size: yesLiq }], [{ price: yesAsk, size: yesLiq }]);
+                const bookNo = orderBookFromClob('sim-no-token', 'NO', [{ price: noAsk - 0.01, size: noLiq }], [{ price: noAsk, size: noLiq }]);
+                return { bookYes, bookNo };
+            }
+
+            function booksFromHistoryRow(row) {
+                const yesAsk = Number(row.yesAsk);
+                const noAsk = Number(row.noAsk);
+                const yesBid = row.yesBid != null ? Number(row.yesBid) : Math.round((yesAsk - 0.01) * 100) / 100;
+                const noBid = row.noBid != null ? Number(row.noBid) : Math.round((noAsk - 0.01) * 100) / 100;
+                const liq = 100;
+                const bookYes = orderBookFromClob('hist-yes', 'YES', [{ price: yesBid, size: liq }], [{ price: yesAsk, size: liq }]);
+                const bookNo = orderBookFromClob('hist-no', 'NO', [{ price: noBid, size: liq }], [{ price: noAsk, size: liq }]);
+                return { bookYes, bookNo };
+            }
+
+            function simulateOneWindow(config, windowNum, ticksPerWindow, rng, historySeries) {
+                const wSec = btcWindowDurationSec(config);
+                const slug = `btc-${config.btcMarketWindowMinutes}m-window-${windowNum}`;
+                const windowEnd = new Date(Date.now() + wSec * 1000).toISOString();
+                let state = createEmptyWindowState(slug, '0xsim', windowEnd);
+                let trades = 0;
+                let roundsThisWindow = 0;
+                let lastExecutedSide = null;
+                const paperFills = [];
+
+                for (let i = 0; i < ticksPerWindow; i++) {
+                    let bookYes, bookNo;
+                    if (historySeries && historySeries.length > 0) {
+                        const row = historySeries[Math.min(i, historySeries.length - 1)];
+                        const o = booksFromHistoryRow(row);
+                        bookYes = o.bookYes;
+                        bookNo = o.bookNo;
+                    } else {
+                        const o = generateTickSynthetic(i, ticksPerWindow, rng, 0.15);
+                        bookYes = o.bookYes;
+                        bookNo = o.bookNo;
+                    }
+
+                    const denom = Math.max(ticksPerWindow - 1, 1);
+                    const secondsLeft = Math.max(1, Math.floor((wSec * (ticksPerWindow - 1 - i)) / denom));
+                    const decision = decide(config, state, bookYes, bookNo, undefined, {
+                        roundsThisWindow,
+                        lastExecutedSide,
+                        secondsLeft,
+                        availableBalanceUsd: config.paperStartingBalanceUsd ?? 5000,
+                    });
+                    if (decision.action !== 'HOLD') {
+                        const side = decision.action === 'BUY_YES' ? 'YES' : 'NO';
+                        const cost = decision.price * decision.size;
+                        state = updateWindowStateFromFill(state, side, decision.size, cost);
+                        paperFills.push({ size: decision.size, price: decision.price, liquidity: 'MAKER' });
+                        trades++;
+                        roundsThisWindow++;
+                        lastExecutedSide = side;
+                    }
+
+                    if (state.totalSpentUsd >= config.maxPositionPerWindowUsd) break;
+                }
+
+                const estFees = sumPaperRecordedTakerFeesUsd(paperFills, config.feeBips);
+                const netProfit = state.lockedProfit - estFees;
+
+                return {
+                    windowNum,
+                    pairCost: state.pairCost,
+                    qtyYes: state.qtyYes,
+                    qtyNo: state.qtyNo,
+                    costYes: state.costYes,
+                    costNo: state.costNo,
+                    totalSpent: state.totalSpentUsd,
+                    lockedProfit: state.lockedProfit,
+                    estFees,
+                    netProfit,
+                    trades,
+                    profitable: netProfit > 0,
+                };
+            }
+
+            async function runSimulation(opts) {
+                const config = Object.assign(defaultConfig(), opts.configPatch || {});
+                const seed = opts.seed || 'default-seed';
+                const numWindows = Math.max(1, Number(opts.numWindows) || 50);
+                const ticksPerWindow = Math.max(5, Number(opts.ticksPerWindow) || 30);
+                const chunk = Math.max(1, Number(opts.chunkTicks) || CHUNK_DEFAULT);
+                const rng = mulberry32(hashSeed(seed));
+
+                let historySeries = null;
+                if (opts.historyJson && String(opts.historyJson).trim()) {
+                    try {
+                        historySeries = JSON.parse(opts.historyJson);
+                        if (!Array.isArray(historySeries)) throw new Error('JSON must be an array');
+                    } catch (e) {
+                        throw new Error('Invalid history JSON: ' + e.message);
+                    }
+                }
+
+                console.log('='.repeat(70));
+                console.log('  POLYMARKET HEDGE BOT — BROWSER SIMULATION');
+                console.log('='.repeat(70));
+                console.log(`  seed=${seed}  windows=${numWindows}  ticks/window=${ticksPerWindow}`);
+                console.log(`  mode=${historySeries ? 'historical JSON' : 'synthetic (seeded RNG)'}`);
+                console.log(`  targetPairCostMax=${config.targetPairCostMax} safetyMargin=${config.safetyMargin}`);
+                console.log('-'.repeat(70));
+
+                const results = [];
+                for (let w = 1; w <= numWindows; w++) {
+                    const winRng = mulberry32(hashSeed(seed + ':window:' + w));
+                    const r = simulateOneWindow(config, w, ticksPerWindow, winRng, historySeries);
+                    results.push(r);
+                    const flag = r.profitable ? '✓' : '✗';
+                    const pairStr = r.pairCost > 0 ? r.pairCost.toFixed(4) : 'n/a  ';
+                    console.log(
+                        `  ${flag} Window ${String(w).padStart(3)}: pairCost=${pairStr} ` +
+                            `YES=${String(r.qtyYes.toFixed(0)).padStart(5)} NO=${String(r.qtyNo.toFixed(0)).padStart(5)} ` +
+                            `spent=$${r.totalSpent.toFixed(2).padStart(7)} locked=$${r.lockedProfit.toFixed(2).padStart(7)} ` +
+                            `net=$${r.netProfit.toFixed(2).padStart(7)} trades=${r.trades}`
+                    );
+
+                    if (w % chunk === 0) await new Promise((res) => setTimeout(res, 0));
+                }
+
+                const tradedWindows = results.filter((r) => r.trades > 0);
+                const profitableWindows = results.filter((r) => r.profitable);
+                const totalNet = results.reduce((s, r) => s + r.netProfit, 0);
+                const pairCosts = tradedWindows.map((r) => r.pairCost).filter((p) => p > 0);
+                const avgPairCost = pairCosts.length ? pairCosts.reduce((a, b) => a + b, 0) / pairCosts.length : 0;
+
+                console.log('-'.repeat(70));
+                console.log(`  Windows with trades: ${tradedWindows.length}/${results.length}`);
+                console.log(`  Profitable windows: ${profitableWindows.length}/${tradedWindows.length || 1}`);
+                console.log(`  Total net (locked − est taker fees): $${totalNet.toFixed(2)}`);
+                console.log(`  Avg pair cost (where > 0): ${avgPairCost > 0 ? avgPairCost.toFixed(4) : 'n/a'}`);
+                console.log('='.repeat(70));
+
+                return { config, results, summary: { totalNet, avgPairCost, tradedWindows: tradedWindows.length } };
+            }
+
+            const uiHint = () => document.getElementById('hint');
+
+            async function runFromUi(synthetic) {
+                const hint = uiHint();
+                hint.textContent = 'Running…';
+                try {
+                    const seed = document.getElementById('seedField').value.trim() || 'default';
+                    const numWindows = Number(document.getElementById('windowsField').value);
+                    const ticksPerWindow = Number(document.getElementById('ticksField').value);
+                    const chunkTicks = Number(document.getElementById('chunkField').value);
+                    const wm = Number(document.getElementById('windowMinutesField').value);
+                    const historyJson = synthetic ? '' : document.getElementById('historyJsonField').value;
+
+                    const lastSummary = await runSimulation({
+                        seed,
+                        numWindows,
+                        ticksPerWindow,
+                        chunkTicks,
+                        historyJson,
+                        configPatch: { btcMarketWindowMinutes: wm },
+                    });
+                    window.PolymarketSim.lastSummary = lastSummary;
+                    hint.textContent = 'Done. See console for per-window lines and totals.';
+                } catch (e) {
+                    console.error(e);
+                    hint.textContent = 'Error: ' + e.message;
+                }
+            }
+
+            document.getElementById('runSyntheticBtn').onclick = () => runFromUi(true);
+            document.getElementById('runHistoryBtn').onclick = () => runFromUi(false);
+
+            window.PolymarketSim = {
+                runSynthetic: async (o) => runSimulation(Object.assign({ seed: document.getElementById('seedField').value }, o)),
+                runSimulation,
+                defaultConfig,
+                helpers: {
+                    decide,
+                    createEmptyWindowState,
+                    updateWindowStateFromFill,
+                    orderBookFromClob,
+                    generateTickSynthetic,
+                },
+            };
+        })();
+    </script>
+</body>
+
+</html>
