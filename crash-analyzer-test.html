@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Crash Analyzer Tool</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 720px; margin: 1rem auto; padding: 0 1rem; }
+        label { display: block; margin-top: 0.75rem; font-weight: 600; }
+        input { width: 100%; max-width: 42rem; padding: 0.35rem 0.5rem; margin-top: 0.25rem; }
+        button { margin-top: 1rem; padding: 0.5rem 1rem; cursor: pointer; }
+        #hint { color: #444; font-size: 0.9rem; margin-top: 1rem; }
+    </style>
+</head>
+
+<body>
+    <h2>Crash Analyzer Tool</h2>
+    <p>Open DevTools → Console (F12) to see full logs. Large runs are chunked so the tab stays responsive.</p>
+
+    <label for="inputSeedField">Server seed (hex)</label>
+    <input type="text" id="inputSeedField" spellcheck="false"
+        value="d27eb5af55e207cc93aa2e540590d5454f1a5e39d9e0292be272672d0e75bed2" />
+
+    <label for="roundsCountField">Total crash rounds to generate</label>
+    <input type="number" id="roundsCountField" min="1000" step="1000" value="252000" />
+
+    <button id="runAnalyzerButton" type="button">Analyze</button>
+    <p id="hint"></p>
+
+    <script>
+        const masterSalt = "0000000000000000000301e2801a9a9598bfb114e574a91a887f2132f33047e6";
+        const scanWindowSize = 36000;
+
+        const CHUNK_SCANS = 500;
+
+        let initialBankroll = 2200;
+        let bankroll = initialBankroll;
+        let baseBet = 2;
+        let currentBet = baseBet;
+        let isCombo = 0;
+        let isComboArray = [];
+        let targetMultiplier = 1.5;
+        let maxBetSequence = 7;
+
+        let sequenceStreak = 0;
+        let lossCounter = 0;
+        let accumulatedProfit = 0;
+        let totalWagered = 0;
+        let strategyInvoked = 0;
+        let haltSimulation = false;
+
+        let exitFlag = 0;
+        let underMultiplierStreak = 0;
+        let visited = false;
+        let isBetting = 0;
+        let underMultiplierList = [];
+        let underStreakCount = 0;
+        let triggerFlag = 0;
+
+        function resetSimulationState() {
+            bankroll = initialBankroll;
+            baseBet = 2;
+            currentBet = baseBet;
+            isCombo = 0;
+            isComboArray = [];
+            sequenceStreak = 0;
+            lossCounter = 0;
+            accumulatedProfit = 0;
+            totalWagered = 0;
+            strategyInvoked = 0;
+            haltSimulation = false;
+            exitFlag = 0;
+            underMultiplierStreak = 0;
+            visited = false;
+            isBetting = 0;
+            underMultiplierList = [];
+            underStreakCount = 0;
+            triggerFlag = 0;
+        }
+
+        document.getElementById("runAnalyzerButton").onclick = async function () {
+            const roundTotal = Number(document.getElementById("roundsCountField").value);
+            const inputSeed = document.getElementById("inputSeedField").value.trim();
+            const hint = document.getElementById("hint");
+            hint.textContent = "Running…";
+
+            if (!inputSeed || !Number.isFinite(roundTotal) || roundTotal < scanWindowSize + 1) {
+                hint.textContent = `Need at least ${scanWindowSize + 1} rounds (window ${scanWindowSize} + 1 outcome to bet).`;
+                return;
+            }
+
+            resetSimulationState();
+
+            console.log(`Starting analysis of ${roundTotal} crash rounds...`);
+            console.log(`Initial Bankroll: $${bankroll}`);
+
+            const crashHistory = [];
+            for (const { bust } of generateCrashSequence(inputSeed, roundTotal)) {
+                crashHistory.push(bust);
+            }
+
+            const maxScan = crashHistory.length - scanWindowSize - 1;
+
+            for (let scanIndex = 0; scanIndex <= maxScan && !haltSimulation; scanIndex++) {
+                if (exitFlag === 1) {
+                    console.log("Stopped because of 7+ loss streak", "bankroll =", bankroll);
+                    hint.textContent = "Stopped (7+ loss streak). See console.";
+                    return;
+                }
+                if (bankroll < 0) {
+                    console.log("Stopped because bankroll reached zero", "bankroll =", bankroll);
+                    hint.textContent = "Stopped (bankroll < 0). See console.";
+                    return;
+                }
+
+                const windowSlice = crashHistory.slice(scanIndex, scanIndex + scanWindowSize);
+                const evaluation = evaluateWindow(windowSlice);
+
+                const nextIdx = scanIndex + scanWindowSize;
+                const roundMultiplier = crashHistory[nextIdx];
+
+                if (triggerFlag === 1) {
+                    console.log(
+                        "eval >>>",
+                        roundMultiplier,
+                        evaluation.depth100,
+                        evaluation.depth200,
+                        evaluation.depth300,
+                        evaluation.depth400,
+                        evaluation.depth500,
+                        evaluation.depth1000,
+                        evaluation.depth2000,
+                        evaluation.depth3000,
+                        evaluation.depth6000,
+                        evaluation.depth9000,
+                        evaluation.depth18000,
+                        evaluation.depth36000
+                    );
+                    console.log(
+                        `-------- Scan ${scanIndex} | confidenceScore: ${evaluation.confidenceScore} | depth100: ${evaluation.depth100}`
+                    );
+                    triggerFlag = 0;
+                }
+
+                if (evaluation.depth100 >= 49 && evaluation.totalFull >= 200) {
+                    sequenceStreak = 4;
+                    visited = true;
+                    console.log("evaluation.depth100 = ", evaluation.depth100, "sequenceStreak =", sequenceStreak);
+                    triggerBetEngine(evaluation.confidenceScore, roundMultiplier, scanIndex);
+                } else if (evaluation.confidenceScore >= 11 && evaluation.depth100 >= 39) {
+                    visited = false;
+                    console.log("evaluation.depth100 = ", evaluation.depth100, "sequenceStreak =", sequenceStreak);
+                    triggerBetEngine(evaluation.confidenceScore, roundMultiplier, scanIndex);
+                } else {
+                    sequenceStreak = 0;
+                    lossCounter = 0;
+                    isBetting = 0;
+
+                    if (roundMultiplier < 1.5) {
+                        underMultiplierStreak++;
+                        underMultiplierList.push(roundMultiplier);
+                        if (underMultiplierStreak >= maxBetSequence) {
+                            underStreakCount++;
+                        }
+                    } else {
+                        underMultiplierStreak = 0;
+                        underMultiplierList = [];
+                    }
+                }
+
+                if (scanIndex % 3000 === 0 && !haltSimulation) {
+                    console.log(`Progress: ${scanIndex}/${maxScan} windows...`, "bankroll =", bankroll);
+                    console.log(
+                        "eval >>>",
+                        roundMultiplier,
+                        evaluation.depth100,
+                        evaluation.depth200,
+                        evaluation.depth300,
+                        evaluation.depth400,
+                        evaluation.depth500,
+                        evaluation.depth1000,
+                        evaluation.depth2000,
+                        evaluation.depth3000,
+                        evaluation.depth6000,
+                        evaluation.depth9000,
+                        evaluation.depth18000,
+                        evaluation.depth36000,
+                        evaluation.depth72000,
+                        evaluation.totalFull
+                    );
+                    console.log(
+                        `-------- Scan ${scanIndex} | confidenceScore: ${evaluation.confidenceScore} | depth100: ${evaluation.depth100}`
+                    );
+                }
+
+                if (scanIndex > 0 && scanIndex % CHUNK_SCANS === 0) {
+                    await new Promise((r) => setTimeout(r, 0));
+                }
+            }
+
+            if (!haltSimulation) {
+                console.log(`Simulation complete.`);
+                console.log(`Strategy invoked ${strategyInvoked} times.`);
+                console.log(`Final Bankroll: $${bankroll.toFixed(2)}`);
+                console.log("7x Loss Streak Count =", underStreakCount);
+                console.log(`Net Profit: ${(bankroll - initialBankroll).toFixed(2)}`);
+                hint.textContent = "Done. Final bankroll and stats are in the console.";
+            }
+        };
+
+        function evaluateWindow(arr) {
+            let count = 0;
+            let confidenceScore = 0;
+            let depth100 = 0;
+            let depth200 = 0;
+            let depth300 = 0;
+            let depth400 = 0;
+            let depth500 = 0;
+            let depth1000 = 0;
+            let depth2000 = 0;
+            let depth3000 = 0;
+            let depth6000 = 0;
+            let depth9000 = 0;
+            let depth18000 = 0;
+            let depth36000 = 0;
+            let depth72000 = 0;
+            let depth144000 = 0;
+            let totalFull = 0;
+
+            for (let i = 0; i < arr.length; i++) {
+                const v = arr[i];
+                if (v < 1.5) count++;
+                if (i <= 100) depth100 = count;
+                if (i <= 200) depth200 = count;
+                if (i <= 300) depth300 = count;
+                if (i <= 400) depth400 = count;
+                if (i <= 500) depth500 = count;
+                if (i <= 1000) depth1000 = count;
+                if (i <= 2000) depth2000 = count;
+                if (i <= 3000) depth3000 = count;
+                if (i <= 6000) depth6000 = count;
+                if (i <= 9000) depth9000 = count;
+                if (i <= 18000) depth18000 = count;
+                if (i <= 36000) depth36000 = count;
+            }
+
+            totalFull += depth100 - 34;
+            totalFull += depth200 - 70;
+            totalFull += depth300 - 105;
+            totalFull += depth400 - 135;
+            totalFull += depth500 - 170;
+            totalFull += depth1000 - 340;
+            totalFull += depth2000 - 680;
+            totalFull += depth3000 - 1020;
+            totalFull += depth6000 - 2040;
+            totalFull += depth9000 - 3060;
+            totalFull += depth18000 - 6120;
+            totalFull += depth36000 - 12240;
+
+            if (depth100 >= 25) {
+                depth200 >= 80 ? confidenceScore++ : confidenceScore--;
+                depth300 >= 125 ? confidenceScore++ : confidenceScore--;
+                depth400 >= 135 ? confidenceScore++ : confidenceScore--;
+                depth500 >= 175 ? confidenceScore++ : confidenceScore--;
+                depth1000 >= 342 ? confidenceScore++ : confidenceScore--;
+                depth2000 >= 670 ? confidenceScore++ : confidenceScore--;
+                depth3000 >= 1010 ? confidenceScore++ : confidenceScore--;
+                depth6000 >= 2022 ? confidenceScore++ : confidenceScore--;
+                depth9000 >= 3033 ? confidenceScore++ : confidenceScore--;
+                depth18000 >= 6130 ? confidenceScore++ : confidenceScore--;
+                depth36000 >= 12400 ? confidenceScore++ : confidenceScore--;
+            }
+
+            return {
+                confidenceScore,
+                totalFull,
+                depth100,
+                depth200,
+                depth300,
+                depth400,
+                depth500,
+                depth1000,
+                depth2000,
+                depth3000,
+                depth6000,
+                depth9000,
+                depth18000,
+                depth36000,
+                depth72000,
+                depth144000,
+            };
+        }
+
+        function triggerBetEngine(confidenceScore, lastVal, index) {
+            if (haltSimulation) return;
+            strategyInvoked++;
+
+            currentBet = baseBet;
+            totalWagered += currentBet;
+
+            if (lastVal < targetMultiplier) {
+                lossCounter++;
+                if (lossCounter >= maxBetSequence) {
+                    triggerFlag = 1;
+                    console.warn("Detected max consecutive losses (sequence)");
+                    currentBet = baseBet;
+                    lossCounter = 0;
+                }
+            } else lossCounter = 0;
+
+            console.log("sequenceStreak", sequenceStreak);
+
+            if (lastVal < targetMultiplier) {
+                if (isBetting === 0) (currentBet = baseBet), (sequenceStreak = 0);
+                console.log("secx", sequenceStreak);
+                if (sequenceStreak >= 1) {
+                    let acc = 0;
+                    let update = 0;
+                    for (let j = 0; j <= sequenceStreak; j++) {
+                        update = (acc + currentBet / 2) / 0.5;
+                        acc += update;
+                    }
+                    currentBet = update;
+                }
+                sequenceStreak++;
+                isBetting = 1;
+                bankroll -= currentBet;
+                accumulatedProfit -= currentBet;
+
+                console.log(
+                    "index =",
+                    index,
+                    "lastVal = ",
+                    lastVal,
+                    "cur bet ",
+                    currentBet,
+                    "sequenceStreak = ",
+                    sequenceStreak,
+                    "bankroll = ",
+                    bankroll
+                );
+            } else {
+                if (sequenceStreak >= 1) {
+                    let acc = 0;
+                    let update = 0;
+                    for (let j = 0; j <= sequenceStreak; j++) {
+                        update = (acc + currentBet / 2) / 0.5;
+                        acc += update;
+                    }
+                    currentBet = update;
+                }
+                const winProfit = currentBet / 2;
+                bankroll += winProfit;
+                accumulatedProfit += winProfit;
+                sequenceStreak = 0;
+                isBetting = 0;
+            }
+            console.log(
+                "currentBet = ",
+                currentBet,
+                "isBetting",
+                isBetting,
+                "sequenceStreak",
+                sequenceStreak,
+                "lastVal =",
+                lastVal,
+                "balance = ",
+                bankroll,
+                "-------------------------"
+            );
+
+            if (sequenceStreak >= maxBetSequence)
+                (sequenceStreak = 0), (currentBet = baseBet);
+        }
+
+        function* generateCrashSequence(seed, count) {
+            let previous = null;
+            for (let i = 0; i < count; i++) {
+                const hash = String(previous ? CryptoJS.SHA256(String(previous)) : seed);
+                const bust = calculateCrashMultiplier(hash, masterSalt);
+                yield { hash, bust };
+                previous = hash;
+            }
+        }
+
+        function calculateCrashMultiplier(seed, salt) {
+            const nBits = 52;
+            const hmac = CryptoJS.HmacSHA256(CryptoJS.enc.Hex.parse(seed), salt);
+            seed = hmac.toString(CryptoJS.enc.Hex);
+            seed = seed.slice(0, nBits / 4);
+
+            const r = parseInt(seed, 16);
+            let X = r / Math.pow(2, nBits);
+            X = 99 / (1 - X);
+
+            const result = Math.floor(X);
+            return Math.max(1, result / 100);
+        }
+    </script>
+</body>
+
+</html>
