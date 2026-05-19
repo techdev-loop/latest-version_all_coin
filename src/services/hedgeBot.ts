@@ -2954,26 +2954,30 @@ export class HedgeBot {
     }
 
     /**
-     * One-sided survival FOK at ask: `final` only in last finalOneSidedHedgeSeconds; `momentum` when BTC gap
-     * sign crosses vs window open (one-sided inventory) — reduces blow-ups when the market runs one way.
+     * One-sided survival FOK at ask:
+     * - `final`: only in last finalOneSidedHedgeSeconds.
+     * - `momentum`: when BTC gap sign crosses vs window open.
+     * - `forced`: hard timeout hedge for prolonged one-sided exposure (does not require momentum flip).
      */
     private async tryExecuteOneSidedFokHedge(
         market: ActiveMarket,
         state: WindowState,
         secondsLeft: number,
         q: boolean,
-        kind: 'final' | 'momentum'
+        kind: 'final' | 'momentum' | 'forced'
     ): Promise<boolean> {
         const absCut = this.config.absoluteNoOrderSeconds ?? 2;
         const finalSec = this.config.finalOneSidedHedgeSeconds ?? 30;
-        const tag = kind === 'momentum' ? 'MOMENTUM' : 'FINAL';
+        const tag = kind === 'final' ? 'FINAL' : kind === 'momentum' ? 'MOMENTUM' : 'FORCED';
 
         if (kind === 'final') {
             if (secondsLeft <= absCut || secondsLeft > finalSec) return false;
-        } else {
+        } else if (kind === 'momentum') {
             if (secondsLeft <= absCut) return false;
             if (this.config.momentumInversionHedgeEnabled === false) return false;
             if (!this.btcMomentumSnapshot.flipDetected) return false;
+        } else {
+            if (secondsLeft <= absCut) return false;
         }
 
         const z = 1e-8;
@@ -3021,7 +3025,7 @@ export class HedgeBot {
             secondsLeft,
             {
                 btcUsdDeltaFromWindowOpen: btcDelta,
-                bypassFinalTimeWindow: kind === 'momentum',
+                bypassFinalTimeWindow: kind !== 'final',
             }
         );
         if (d === null) return false;
@@ -3045,7 +3049,12 @@ export class HedgeBot {
         const ts = this.config.tickSize || 0.01;
         const limitPx = Math.min(0.99, Math.round((d.price + ts) * 100) / 100);
         const orderCost = limitPx * d.size;
-        const reasonCode = kind === 'momentum' ? 'MOMENTUM_FLIP_HEDGE' : 'FINAL_ONE_SIDED_HEDGE';
+        const reasonCode =
+            kind === 'momentum'
+                ? 'MOMENTUM_FLIP_HEDGE'
+                : kind === 'forced'
+                  ? 'FORCED_ONE_SIDED_TIMEOUT_HEDGE'
+                  : 'FINAL_ONE_SIDED_HEDGE';
 
         const roundNum = this.roundsThisWindow + 1;
         const tokenId = side === 'YES' ? market.yesTokenId : market.noTokenId;
@@ -3110,7 +3119,12 @@ export class HedgeBot {
         if (!appliedOneSided) return false;
 
         const wsOut = this.windowState!;
-        const label = kind === 'momentum' ? 'Momentum flip hedge' : 'Final hedge';
+        const label =
+            kind === 'momentum'
+                ? 'Momentum flip hedge'
+                : kind === 'forced'
+                  ? 'Forced timeout hedge'
+                  : 'Final hedge';
         updateDashboardState({
             ...this.getDashboardExtras(),
             marketSlug: market.slug,
@@ -4507,7 +4521,7 @@ export class HedgeBot {
                 state,
                 secondsLeft,
                 q,
-                'momentum'
+                'forced'
             );
             if (forceHandled) return;
         }
