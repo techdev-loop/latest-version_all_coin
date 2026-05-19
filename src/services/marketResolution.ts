@@ -143,15 +143,7 @@ export function extractGammaBtcUpDownOraclePrices(market: unknown): {
     }
     const ptb = meta.priceToBeat != null ? Number(meta.priceToBeat) : NaN;
     const fp = meta.finalPrice != null ? Number(meta.finalPrice) : NaN;
-<<<<<<< HEAD
     const cpRaw = meta.currentPrice ?? meta.current_price ?? meta.lastPrice ?? meta.last_price;
-=======
-    const cpRaw =
-        (meta as any).currentPrice ??
-        (meta as any).current_price ??
-        (meta as any).lastPrice ??
-        (meta as any).last_price;
->>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
     const cp = cpRaw != null ? Number(cpRaw) : NaN;
     return {
         priceToBeat: Number.isFinite(ptb) ? ptb : null,

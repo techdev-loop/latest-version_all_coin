@@ -3,13 +3,8 @@
  * Used for dashboard display and cross-checking internal fill reconciliation.
  */
 
-<<<<<<< HEAD
 import type { ClobClient } from '@polymarket/clob-client-v2';
 import { Side } from '@polymarket/clob-client-v2';
-=======
-import type { ClobClient } from '@polymarket/clob-client';
-import { Side } from '@polymarket/clob-client';
->>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
 import type { ActiveMarket } from '../interfaces/strategyInterfaces';
 
 export interface LiveVerifiedBuyTrade {
@@ -49,11 +44,7 @@ export async function fetchClobBuyTradesForMarket(
     const collected: LiveVerifiedBuyTrade[] = [];
     const seen = new Set<string>();
 
-<<<<<<< HEAD
     /** CLOB pagination end marker (see @polymarket/clob-client-v2 constants). */
-=======
-    /** CLOB pagination end marker (see @polymarket/clob-client constants). */
->>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
     const END_CURSOR = 'LTE=';
     let nextCursor: string | undefined;
     const maxPages = 40;

@@ -124,7 +124,6 @@ function normalizeBtcWindowMinutes(raw: unknown): 5 | 15 {
     return 15;
 }
 
-<<<<<<< HEAD
 /** True when `secondsLeft` is inside the configured soft-stop band; `stop === 0` disables it. */
 export function inStopTradingSecondsBeforeEndWindow(
     secondsLeft: number,
@@ -132,9 +131,6 @@ export function inStopTradingSecondsBeforeEndWindow(
 ): boolean {
     return stopTradingSecondsBeforeEnd > 0 && secondsLeft <= stopTradingSecondsBeforeEnd;
 }
-=======
-export { inStopTradingSecondsBeforeEndWindow } from './tradingWindowHelpers';
->>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
 
 export function loadStrategyConfig(): StrategyConfig {
     let file: StrategyFile = {};

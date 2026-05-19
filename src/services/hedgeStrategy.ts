@@ -17,13 +17,8 @@ import type {
     OrderBookLevel,
     StrategyDecisionContext,
 } from '../interfaces/strategyInterfaces';
-<<<<<<< HEAD
 import { inStopTradingSecondsBeforeEndWindow } from '../config/strategyConfig';
 import { btcWindowDurationSec } from './marketDiscovery';
-=======
-import { inStopTradingSecondsBeforeEndWindow } from '../config/tradingWindowHelpers';
-import { btcWindowDurationSec } from '../utils/btcWindow';
->>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
 import {
     effectiveWarmupSeconds,
     buildSizeLadderFromConfig,

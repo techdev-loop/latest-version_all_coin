@@ -10,22 +10,6 @@
 
 import axios from 'axios';
 import type { ActiveMarket, StrategyConfig } from '../interfaces/strategyInterfaces';
-<<<<<<< HEAD
-=======
-import {
-    BTC_WINDOW_5M_SEC,
-    BTC_WINDOW_15M_SEC,
-    btcWindowDurationSec,
-    btcWindowMinutesLabel,
-} from '../utils/btcWindow';
-
-export {
-    BTC_WINDOW_5M_SEC,
-    BTC_WINDOW_15M_SEC,
-    btcWindowDurationSec,
-    btcWindowMinutesLabel,
-} from '../utils/btcWindow';
->>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
 
 const GAMMA_API = 'https://gamma-api.polymarket.com';
 /**
@@ -36,7 +20,6 @@ const GAMMA_API = 'https://gamma-api.polymarket.com';
 const WINDOWS_TO_CHECK = 4;
 const SLUG_FETCH_TIMEOUT_MS = 2500;
 
-<<<<<<< HEAD
 export const BTC_WINDOW_5M_SEC = 300;
 export const BTC_WINDOW_15M_SEC = 900;
 
@@ -50,8 +33,6 @@ export function btcWindowMinutesLabel(config: StrategyConfig): 5 | 15 {
     return config.btcMarketWindowMinutes === 5 ? 5 : 15;
 }
 
-=======
->>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
 interface GammaMarket {
     id?: string;
     conditionId?: string;

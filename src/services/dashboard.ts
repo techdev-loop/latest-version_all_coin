@@ -270,11 +270,7 @@ function buildLiveSessionOrderHistoryHtml(state: DashboardState): string {
         const wEnd = win.windowEndIso;
         const btcMin = win.btcMarketWindowMinutes;
         const cid = win.conditionId ?? null;
-<<<<<<< HEAD
         const clobWin: LiveVerifiedBuyTrade[] | undefined =
-=======
-        let clobWin: LiveVerifiedBuyTrade[] | undefined =
->>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
             cid && state.sessionClobTradesByCondition[cid] !== undefined
                 ? state.sessionClobTradesByCondition[cid]
                 : undefined;

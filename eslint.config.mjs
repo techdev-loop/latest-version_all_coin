@@ -6,12 +6,9 @@ import prettierPlugin from 'eslint-plugin-prettier';
 
 /** @type {import('eslint').Linter.Config[]} */
 export default [
-<<<<<<< HEAD
     {
         ignores: ['dist/**', 'src/enc.js'],
     },
-=======
->>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
     { files: ['**/*.{js,mjs,cjs,ts}'] },
     { languageOptions: { globals: globals.node } },
     pluginJs.configs.recommended,

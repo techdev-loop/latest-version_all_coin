@@ -4,11 +4,7 @@
  */
 
 import type { StrategyConfig, WindowState } from '../interfaces/strategyInterfaces';
-<<<<<<< HEAD
 import { btcWindowDurationSec } from './marketDiscovery';
-=======
-import { btcWindowDurationSec } from '../utils/btcWindow';
->>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
 
 export type EntryDirectionReason =
     | 'PARITY_REBALANCE'
@@ -180,11 +176,7 @@ export function capClipForSettlementQtyParity(
         return shares;
     }
 
-<<<<<<< HEAD
     const capped = Math.min(shares, maxAdd);
-=======
-    let capped = Math.min(shares, maxAdd);
->>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
     if (capped <= 0) {
         return 0;
     }
