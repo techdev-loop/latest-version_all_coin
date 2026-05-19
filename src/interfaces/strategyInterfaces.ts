@@ -318,6 +318,12 @@ export interface StrategyConfig {
     aggressiveDualPnlHedgeBypassDualProfitStop?: boolean;
 
     /**
+     * Max fraction of the window the bot can stay one-sided before forcing a taker hedge.
+     * E.g. 0.6 = if one-sided for 60% of the window, force hedge. Default 0.6.
+     */
+    maxOneSidedWindowFraction?: number;
+
+    /**
      * Token sweep: scan wallet for all ERC-20 tokens at startup and swap
      * eligible ones to USDC via Paraswap. Runs before the trading loop begins.
      */

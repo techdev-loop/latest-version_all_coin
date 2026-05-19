@@ -405,6 +405,7 @@ export function loadStrategyConfig(): StrategyConfig {
         immediateImpliedPairCostHedgeEnabled:
             file.immediateImpliedPairCostHedgeEnabled ?? defaults.immediateImpliedPairCostHedgeEnabled,
         immediateOppositePairCostMax: file.immediateOppositePairCostMax,
+        maxOneSidedWindowFraction: file.maxOneSidedWindowFraction,
         tokenSweep: file.tokenSweep,
     };
     return config;

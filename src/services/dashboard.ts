@@ -413,9 +413,12 @@ export function isDashboardEnabled(): boolean {
     return !['0', 'false', 'no', 'off'].includes(v);
 }
 
+export type StrategyProfile = 'original' | 'optimized';
+
 export interface DashboardState {
     running: boolean;
     killSwitch: boolean;
+    strategyProfile: StrategyProfile;
     /** ISO timestamp when this bot process started (used to session-scope live history). */
     sessionStartedAtIso: string;
     marketSlug: string | null;
@@ -611,6 +614,7 @@ export function setAutoOppositeBuyHandler(handler: AutoOppositeBuyHandler | null
 let sharedState: DashboardState = {
     running: false,
     killSwitch: false,
+    strategyProfile: 'optimized',
     sessionStartedAtIso: '',
     marketSlug: null,
     windowEndIso: null,
@@ -1135,6 +1139,12 @@ function buildDashboardLiveInnerHtml(s: DashboardState): string {
           <input type="hidden" name="on" value="${s.killSwitch ? '0' : '1'}" />
           <button type="submit" style="width:100%;padding:10px 12px;border-radius:8px;border:none;cursor:pointer;font-weight:700;font-size:0.86rem;color:#fff;background:${s.killSwitch ? 'linear-gradient(135deg,#059669,#047857)' : 'linear-gradient(135deg,#dc2626,#b91c1c)'};">
             ${s.killSwitch ? 'Resume Trading' : 'Emergency Stop'}
+          </button>
+        </form>
+        <form method="post" action="/strategyProfile" style="margin:0 0 10px;">
+          <input type="hidden" name="profile" value="${s.strategyProfile === 'optimized' ? 'original' : 'optimized'}" />
+          <button type="submit" style="width:100%;padding:10px 12px;border-radius:8px;border:none;cursor:pointer;font-weight:700;font-size:0.82rem;color:#fff;background:${s.strategyProfile === 'optimized' ? 'linear-gradient(135deg,#7c3aed,#6d28d9)' : 'linear-gradient(135deg,#0369a1,#075985)'};">
+            Strategy: ${s.strategyProfile === 'optimized' ? 'Optimized' : 'Original'} (Click to switch)
           </button>
         </form>
         <div class="floating-entry-controls">
@@ -2675,6 +2685,18 @@ export function startDashboard(port?: number): http.Server {
                 const form = new URLSearchParams(body.join(''));
                 const on = form.get('on') === '1';
                 sharedState.killSwitch = on;
+                res.writeHead(302, { Location: '/' });
+                res.end();
+            });
+            return;
+        }
+        if (pathname === '/strategyProfile' && method === 'POST') {
+            const body: string[] = [];
+            req.on('data', (ch) => body.push(ch.toString()));
+            req.on('end', () => {
+                const form = new URLSearchParams(body.join(''));
+                const raw = (form.get('profile') || '').trim().toLowerCase();
+                sharedState.strategyProfile = raw === 'original' ? 'original' : 'optimized';
                 res.writeHead(302, { Location: '/' });
                 res.end();
             });

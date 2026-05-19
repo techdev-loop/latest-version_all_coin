@@ -209,6 +209,51 @@ export async function getBothOrderBooks(
     return { bookYes, bookNo };
 }
 
+// ─── Orderbook Depth ─────────────────────────────────────────────────────
+
+/**
+ * Calculate available depth (shares) at or near a price level in the orderbook.
+ * For bids: sums all levels at price >= (targetPrice - tolerance).
+ * For asks: sums all levels at price <= (targetPrice + tolerance).
+ */
+export function orderbookDepthAtPrice(
+    levels: Array<{ price: number; size: number }>,
+    targetPrice: number,
+    side: 'bid' | 'ask',
+    toleranceTicks = 2,
+    tickSize = 0.01
+): number {
+    const tolerance = toleranceTicks * tickSize;
+    let total = 0;
+    for (const lvl of levels) {
+        if (side === 'bid' && lvl.price >= targetPrice - tolerance) {
+            total += lvl.size;
+        } else if (side === 'ask' && lvl.price <= targetPrice + tolerance) {
+            total += lvl.size;
+        }
+    }
+    return total;
+}
+
+/**
+ * Cap a clip size to the available orderbook depth so the bot doesn't
+ * try to fill more shares than exist near the target price.
+ * Returns min(requestedShares, depthShares), floored to minShares.
+ */
+export function capClipToOrderbookDepth(
+    requestedShares: number,
+    bookLevels: Array<{ price: number; size: number }>,
+    targetPrice: number,
+    side: 'bid' | 'ask',
+    minShares = 1,
+    tickSize = 0.01
+): number {
+    const depth = orderbookDepthAtPrice(bookLevels, targetPrice, side, 3, tickSize);
+    if (depth <= 0) return minShares;
+    const capped = Math.min(requestedShares, Math.floor(depth * 0.9));
+    return Math.max(capped, minShares);
+}
+
 // ─── Order Placement ─────────────────────────────────────────────────────
 
 /**

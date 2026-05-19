@@ -75,6 +75,7 @@ import {
     buyInstant,
     reconcilePendingOrders,
     createPendingOrder,
+    capClipToOrderbookDepth,
     type PendingOrder,
     type FillUpdate,
     type OrderResult,
@@ -86,10 +87,14 @@ import {
     recordOrderFailure,
     resetCircuitBreaker,
     setKillSwitch,
+    addPendingExposure,
+    removePendingExposure,
+    updateOneSidedTracking,
+    shouldForceHedge,
     type RiskState,
 } from './riskManager';
 import { logWindowState, logEntry } from './strategyLogger';
-import { updateDashboardState, getDashboardState } from './dashboard';
+import { updateDashboardState, getDashboardState, type StrategyProfile } from './dashboard';
 import {
     getAllBalances,
     getMarketPositionShares,
@@ -216,6 +221,9 @@ function qlog(quiet: boolean, ...args: unknown[]): void {
 
 export class HedgeBot {
     private config: StrategyConfig;
+    private readonly optimizedProfileConfig: StrategyConfig;
+    private readonly originalProfileOverrides: Partial<StrategyConfig>;
+    private activeStrategyProfile: StrategyProfile = 'optimized';
     private client: ClobClient;
     private intervalId: ReturnType<typeof setInterval> | null = null;
     private windowState: WindowState | null = null;
@@ -380,6 +388,27 @@ export class HedgeBot {
 
     constructor(private options: HedgeBotOptions) {
         this.config = options.config;
+        this.optimizedProfileConfig = { ...options.config };
+        this.originalProfileOverrides = {
+            safetyMargin: 0.98,
+            strictMaxPairCostInclusive: 0.98,
+            orderSizeShares: 1000,
+            initialEntryShares: 50,
+            pairStockARandomSharesMin: 50,
+            pairStockARandomSharesMax: 52,
+            stopTradingSecondsBeforeEnd: 90,
+            maxSingleOrderUsd: 52,
+            maxClipShares: 52,
+            sizeLadderShares: [20, 75, 150, 300, 500],
+            dualOutcomeProfitStopUsd: 4,
+            minDualAfterPnlUsd: 0.65,
+            aggressiveDualPnlHedgeMinAfterPnlUsd: 1,
+            predictionBtcGapMinAbsUsd: 35,
+            momentumBiasGapUsd: 35,
+            momentumAllowDownGapUsd: -35,
+            unrestrictedPredictionBuys: true,
+            maxOneSidedWindowFraction: undefined,
+        };
         this.client = options.clobClient;
         this.orderbookWs =
             this.config.useClobOrderbookWebSocket === true
@@ -389,6 +418,7 @@ export class HedgeBot {
         updateDashboardState({
             running: false,
             killSwitch: this.config.killSwitch,
+            strategyProfile: this.activeStrategyProfile,
             message: 'Bot created; call start() to run',
             walletAddress: ENV.PUBLIC_ADDRESS,
             proxyWalletAddress: ENV.PROXY_WALLET,
@@ -419,6 +449,34 @@ export class HedgeBot {
     /** Run one strategy tick (used by backtrace CLI; normal mode uses start() interval). */
     public async runSingleTick(): Promise<void> {
         await this.tick();
+    }
+
+    private applyStrategyProfile(profile: StrategyProfile): void {
+        if (profile === this.activeStrategyProfile) return;
+        if (profile === 'original') {
+            this.config = {
+                ...this.optimizedProfileConfig,
+                ...this.originalProfileOverrides,
+            };
+        } else {
+            this.config = { ...this.optimizedProfileConfig };
+        }
+        this.activeStrategyProfile = profile;
+        console.log(`[Bot] Strategy profile switched to ${profile}.`);
+    }
+
+    private clearActivePendingOrder(): void {
+        if (!this.activePendingOrder) return;
+        const remaining = Math.max(
+            0,
+            this.activePendingOrder.sizeRequested - this.activePendingOrder.sizeFilled
+        );
+        const remainingUsd = remaining * this.activePendingOrder.price;
+        if (remainingUsd > 0) {
+            this.riskState = removePendingExposure(this.riskState, remainingUsd);
+        }
+        this.activePendingOrder = null;
+        this.activePendingOrderReasonCode = null;
     }
 
     // ─── Balance ─────────────────────────────────────────────────────────
@@ -2604,6 +2662,7 @@ export class HedgeBot {
         const decision30s = this.pickDecisionAtOffset(30_000);
         const decision60s = this.pickDecisionAtOffset(60_000);
         return {
+            strategyProfile: this.activeStrategyProfile,
             walletBalanceUsdc: this.config.liveTrading ? this.cachedBalances.publicWalletUsdc : 0,
             polymarketBalanceUsdc: balanceUsdc,
             totalBalanceUsdc,
@@ -3899,6 +3958,7 @@ export class HedgeBot {
 
     private async executeTick(): Promise<void> {
         const dash = getDashboardState();
+        this.applyStrategyProfile(dash.strategyProfile);
         this.riskState = setKillSwitch(this.riskState, dash.killSwitch);
         const q = !!this.config.quietConsole;
 
@@ -3949,7 +4009,7 @@ export class HedgeBot {
                 } catch {
                     // Best-effort cleanup for stale pending order on window rollover.
                 }
-                this.activePendingOrder = null;
+                this.clearActivePendingOrder();
             }
             this.paperSimulatedMakerOrder = null;
             this.paperSimulatedMakerReasonCode = null;
@@ -4063,7 +4123,7 @@ export class HedgeBot {
                         this.activePendingOrder.sizeFilled +
                         fills.reduce((s, f) => s + f.newFillQty, 0);
                     this.onOrderCompleted(this.activePendingOrder, totalFilled);
-                    this.activePendingOrder = null;
+                    this.clearActivePendingOrder();
                 }
             } catch (err) {
                 console.error('[Bot] Fill reconciliation error:', err);
@@ -4206,7 +4266,7 @@ export class HedgeBot {
                     } else if (!usedTakerFallback && makerFilled <= 0) {
                         this.activePendingOrderReasonCode = null;
                     }
-                    this.activePendingOrder = null;
+                    this.clearActivePendingOrder();
                     updateDashboardState({
                         ...this.getDashboardExtras(),
                         marketSlug: market.slug,
@@ -4237,7 +4297,7 @@ export class HedgeBot {
                 } catch {
                     // Best-effort stale cancellation; continue with fresh cycle.
                 }
-                this.activePendingOrder = null;
+                this.clearActivePendingOrder();
             }
         }
 
@@ -4263,7 +4323,7 @@ export class HedgeBot {
                     } catch {
                         /* ignore */
                     }
-                    this.activePendingOrder = null;
+                    this.clearActivePendingOrder();
                 }
             }
         }
@@ -4392,6 +4452,32 @@ export class HedgeBot {
                     `AFTER PNL: both Up and Down < $0 — no orders (display Up $${apShow.afterPnlIfUp.toFixed(2)} · Down $${apShow.afterPnlIfDown.toFixed(2)})${extra}`,
             });
             return;
+        }
+
+        // ── One-sided duration tracking + forced hedge ──────────────────
+        this.riskState = updateOneSidedTracking(
+            this.riskState,
+            state.qtyYes,
+            state.qtyNo
+        );
+        const maxOneSidedFrac = this.config.maxOneSidedWindowFraction;
+        if (
+            shouldForceHedge(
+                this.riskState,
+                market.windowDurationSec,
+                maxOneSidedFrac
+            ) &&
+            secondsLeft > (this.config.finalOneSidedHedgeSeconds ?? 30)
+        ) {
+            qlog(q, `[Bot] One-sided too long (>${((maxOneSidedFrac ?? 0.6) * 100).toFixed(0)}% of window) — forcing taker hedge`);
+            const forceHandled = await this.tryExecuteOneSidedFokHedge(
+                market,
+                state,
+                secondsLeft,
+                q,
+                'momentum'
+            );
+            if (forceHandled) return;
         }
 
         // ══════════════════════════════════════════════════════════════════
@@ -5778,6 +5864,46 @@ export class HedgeBot {
             }
         }
 
+        if (books && shares > 0) {
+            const tickSz = this.config.tickSize || 0.01;
+            const targetPx = useTaker ? fillPriceAcct : currentBid;
+            const levels =
+                side === 'YES'
+                    ? useTaker
+                        ? books.bookYes.asks
+                        : books.bookYes.bids
+                    : useTaker
+                      ? books.bookNo.asks
+                      : books.bookNo.bids;
+            const cappedByDepth = capClipToOrderbookDepth(
+                shares,
+                levels,
+                targetPx,
+                useTaker ? 'ask' : 'bid',
+                minSzEffPhase7,
+                tickSz
+            );
+            if (cappedByDepth < shares) {
+                const prev = shares;
+                shares = cappedByDepth;
+                orderCost = recomputePhase7OrderCost();
+                orderReasonCode = `${orderReasonCode}|DEPTH_CAP_${prev}→${shares}`;
+                if (shares <= 0 || orderCost < 1.0) {
+                    this.holdsThisWindow++;
+                    updateDashboardState({
+                        ...this.getDashboardExtras(),
+                        marketSlug: market.slug,
+                        windowEndIso: market.endDateIso,
+                        consecutiveFailures: this.riskState.consecutiveOrderFailures,
+                        pendingOrders: this.pendingOrderCount(),
+                        lastTick: new Date().toISOString(),
+                        message: `HOLD: orderbook depth cap reduced clip below executable size`,
+                    });
+                    return;
+                }
+            }
+        }
+
         // ══════════════════════════════════════════════════════════════════
         // ██  PHASE 8: Place limit buy order                              ██
         // ══════════════════════════════════════════════════════════════════
@@ -5881,7 +6007,11 @@ export class HedgeBot {
                     shares
                 );
                 this.activePendingOrderReasonCode = orderReasonCode;
-                this.riskState = resetCircuitBreaker(this.riskState);
+                const pendingCostEst = shares * currentBid;
+                this.riskState = addPendingExposure(
+                    resetCircuitBreaker(this.riskState),
+                    pendingCostEst
+                );
                 logWindowState(
                     state,
                     'order_placed',
@@ -6000,7 +6130,7 @@ export class HedgeBot {
             } catch {
                 /* best-effort */
             }
-            this.activePendingOrder = null;
+            this.clearActivePendingOrder();
         }
         if (
             !this.windowState ||

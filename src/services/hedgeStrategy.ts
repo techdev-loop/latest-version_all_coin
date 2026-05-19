@@ -1093,8 +1093,8 @@ export function buildFinalOneSidedHedgeDecision(
             newState.qtyYes > 0 &&
             newState.qtyNo > 0 &&
             dualAfterPnlMeetsMin(
-                apFin.afterPnlIfUpExcludingCommission,
-                apFin.afterPnlIfDownExcludingCommission,
+                apFin.afterPnlIfUp,
+                apFin.afterPnlIfDown,
                 minD,
                 strictAbove
             ) &&
@@ -1106,7 +1106,7 @@ export function buildFinalOneSidedHedgeDecision(
             const tag = ctx?.bypassFinalTimeWindow ? 'Momentum flip hedge' : 'Final one-sided hedge';
             const cmp = strictAbove ? '>' : '≥';
             const reason =
-                `${tag}: ${size} ${side} @ ask $${price.toFixed(2)} (both P/L ex-commission ${cmp} $${minD.toFixed(2)}; pairCost→${newPairCost.toFixed(4)}; ${secondsLeft}s left)`;
+                `${tag}: ${size} ${side} @ ask $${price.toFixed(2)} (both P/L fee-inclusive ${cmp} $${minD.toFixed(2)}; pairCost→${newPairCost.toFixed(4)}; ${secondsLeft}s left)`;
             return {
                 action: side === 'YES' ? 'BUY_YES' : 'BUY_NO',
                 tokenId,
