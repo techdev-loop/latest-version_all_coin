@@ -19,8 +19,13 @@
  *   tilt toward the leg whose ask is more likely to keep rising (does not override parity/inventory rebalance).
  */
 
+<<<<<<< HEAD
+import { AssetType } from '@polymarket/clob-client-v2';
+import type { ClobClient } from '@polymarket/clob-client-v2';
+=======
 import { AssetType } from '@polymarket/clob-client';
 import type { ClobClient } from '@polymarket/clob-client';
+>>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
 import type {
     StrategyConfig,
     ActiveMarket,
@@ -1904,7 +1909,11 @@ export class HedgeBot {
         bidNoHint?: number
     ): { lo: number; hi: number } {
         const orderMin = Math.max(market.orderMinSize || 0, this.config.orderMinSize || 1);
+<<<<<<< HEAD
+        const lo = Math.max(orderMin, Math.floor(this.config.pairStockARandomSharesMin ?? 25));
+=======
         let lo = Math.max(orderMin, Math.floor(this.config.pairStockARandomSharesMin ?? 25));
+>>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
         let hi = Math.max(lo, Math.floor(this.config.pairStockARandomSharesMax ?? 75));
 
         const maxClip = Math.max(1, Math.floor(this.config.maxClipShares ?? 1_000_000));
@@ -3100,7 +3109,11 @@ export class HedgeBot {
         const minSz = Math.max(market.orderMinSize || 0, cfg.orderMinSize || 1);
         raw = Math.max(raw, minSz);
 
+<<<<<<< HEAD
+        const shares = clampBuySizeForSimulatedGates(state, side, askPx, raw, cfg, {
+=======
         let shares = clampBuySizeForSimulatedGates(state, side, askPx, raw, cfg, {
+>>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
             forceDualAfterPnlEnforcement: true,
             simulatedFillLiquidity: 'TAKER',
         });
@@ -3337,7 +3350,11 @@ export class HedgeBot {
             return false;
         }
 
+<<<<<<< HEAD
+        const orderCost = limitPx * shares;
+=======
         let orderCost = limitPx * shares;
+>>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
         if (orderCost < 1.0) {
             updateDashboardState({
                 ...this.getDashboardExtras(),
@@ -3528,7 +3545,11 @@ export class HedgeBot {
         const { lo: plImmLo } = this.pairStockARandomClipBounds(market, byImm, bnImm);
         const targetImb =
             this.config.pairLadderMatchEnabled === true ? Math.max(imbShares, plImmLo) : imbShares;
+<<<<<<< HEAD
+        const shares = clampBuySizeForSimulatedGates(state, hedgeSide, askPx, targetImb, this.config, {
+=======
         let shares = clampBuySizeForSimulatedGates(state, hedgeSide, askPx, targetImb, this.config, {
+>>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
             simulatedFillLiquidity: 'TAKER',
         });
         if (shares < minSz) return false;
@@ -3941,7 +3962,13 @@ export class HedgeBot {
             if (this.config.liveTrading && this.activePendingOrder) {
                 try {
                     await this.client.cancelOrder({ orderID: this.activePendingOrder.orderId });
+<<<<<<< HEAD
+                } catch {
+                    // Best-effort cleanup for stale pending order on window rollover.
+                }
+=======
                 } catch {}
+>>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
                 this.activePendingOrder = null;
             }
             this.paperSimulatedMakerOrder = null;
@@ -4227,7 +4254,13 @@ export class HedgeBot {
                     const totalFilled =
                         stalePending.sizeFilled + fills.reduce((s, f) => s + f.newFillQty, 0);
                     this.onOrderCompleted(stalePending, totalFilled);
+<<<<<<< HEAD
+                } catch {
+                    // Best-effort stale cancellation; continue with fresh cycle.
+                }
+=======
                 } catch {}
+>>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
                 this.activePendingOrder = null;
             }
         }

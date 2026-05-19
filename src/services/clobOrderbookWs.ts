@@ -2,7 +2,11 @@
  * Polymarket CLOB market channel WebSocket (public orderbook stream).
  * @see https://docs.polymarket.com/developers/CLOB/websocket/market-channel
  *
+<<<<<<< HEAD
+ * Order placement still uses HTTP via @polymarket/clob-client-v2 — only market data is streamed here.
+=======
  * Order placement still uses HTTP via @polymarket/clob-client — only market data is streamed here.
+>>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
  */
 
 import WebSocket from 'ws';

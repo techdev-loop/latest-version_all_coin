@@ -13,8 +13,12 @@
         "lint": "eslint .",
         "lint:fix": "eslint --fix .",
         "format": "prettier --write .",
+<<<<<<< HEAD
+        "test": "echo \"Error: no test specified\" && exit 1"
+=======
         "test": "echo \"Error: no test specified\" && exit 1",
         "build:harness": "esbuild src/browser/strategyHarnessEntry.ts --bundle --platform=browser --format=iife --target=es2018 --outfile=polymarket-strategy-harness.js"
+>>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
     },
     "keywords": [],
     "author": "",
@@ -37,11 +41,18 @@
         "ts-jest": "^29.2.5",
         "ts-node": "^10.9.2",
         "typescript": "^5.7.3",
+<<<<<<< HEAD
+        "typescript-eslint": "^8.23.0"
+    },
+    "dependencies": {
+        "@polymarket/clob-client-v2": "^1.0.6",
+=======
         "typescript-eslint": "^8.23.0",
         "esbuild": "^0.25.0"
     },
     "dependencies": {
         "@polymarket/clob-client": "^4.22.8",
+>>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
         "@polymarket/order-utils": "^2.1.0",
         "axios": "^1.7.9",
         "dotenv": "^16.4.7",
@@ -49,6 +60,10 @@
         "ethers": "^5.7.2",
         "exceljs": "^4.4.0",
         "ora": "^5.4.1",
+<<<<<<< HEAD
+        "viem": "^2.49.3",
+=======
+>>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
         "ws": "^8.20.0"
     }
 }

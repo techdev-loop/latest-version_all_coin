@@ -9,8 +9,13 @@
  *   - Unfilled/partial orders remain pending and are not double-counted
  */
 
+<<<<<<< HEAD
+import { ClobClient, Side, OrderType } from '@polymarket/clob-client-v2';
+import type { TickSize, OpenOrder } from '@polymarket/clob-client-v2';
+=======
 import { ClobClient, Side, OrderType } from '@polymarket/clob-client';
 import type { TickSize, OpenOrder } from '@polymarket/clob-client';
+>>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
 import type { ActiveMarket } from '../interfaces/strategyInterfaces';
 import type { StrategyConfig } from '../interfaces/strategyInterfaces';
 import { orderBookFromClob } from './hedgeStrategy';

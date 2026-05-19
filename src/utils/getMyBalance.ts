@@ -3,6 +3,20 @@ import { ENV } from '../config/env';
 
 const RPC_URL = ENV.RPC_URL;
 
+<<<<<<< HEAD
+// Polygon commonly uses multiple USDC-family contracts:
+// - USDC.e (legacy bridged)
+// - USDC (native)
+// - pUSD (Polymarket collateral on CLOB V2)
+//
+// Some deployments/proxies use a configurable collateral token address.
+// We therefore query:
+// - known Polygon USDC.e + USDC
+// - ENV.COLLATERAL_TOKEN_ADDRESS (or legacy ENV.USDC_CONTRACT_ADDRESS)
+const USDC_E_ADDRESS = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
+const USDC_NATIVE_ADDRESS = '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359';
+const COLLATERAL_TOKEN_ADDRESS = ENV.COLLATERAL_TOKEN_ADDRESS;
+=======
 // Polygon commonly uses two USDC contracts:
 // - USDC.e (bridged): used by Polymarket proxy wallets
 // - USDC (native): commonly held in MetaMask/EOA wallets
@@ -13,6 +27,7 @@ const RPC_URL = ENV.RPC_URL;
 // - ENV.USDC_CONTRACT_ADDRESS (if provided and different)
 const USDC_E_ADDRESS = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
 const USDC_NATIVE_ADDRESS = '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359';
+>>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
 
 const ERC20_ABI = [
     'function balanceOf(address owner) view returns (uint256)',
@@ -65,7 +80,11 @@ async function getTokenDecimals(tokenAddress: string, provider: ethers.providers
 
 async function getUsdcBalance(address: string): Promise<{ usdcNative: number; usdcBridged: number; total: number }> {
     const provider = getProvider();
+<<<<<<< HEAD
+    const tokenList = uniqLower([USDC_E_ADDRESS, USDC_NATIVE_ADDRESS, COLLATERAL_TOKEN_ADDRESS]);
+=======
     const tokenList = uniqLower([USDC_E_ADDRESS, USDC_NATIVE_ADDRESS, ENV.USDC_CONTRACT_ADDRESS]);
+>>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
 
     const balances = await Promise.all(
         tokenList.map(async (token) => {
@@ -220,8 +239,13 @@ export async function checkRedeemability(conditionId: string): Promise<Redeemabi
         ]);
 
         const [yesPositionId, noPositionId] = await Promise.all([
+<<<<<<< HEAD
+            ct.getPositionId(COLLATERAL_TOKEN_ADDRESS, yesCollectionId),
+            ct.getPositionId(COLLATERAL_TOKEN_ADDRESS, noCollectionId),
+=======
             ct.getPositionId(USDC_E_ADDRESS, yesCollectionId),
             ct.getPositionId(USDC_E_ADDRESS, noCollectionId),
+>>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
         ]);
 
         const [yesBalance, noBalance] = await Promise.all([
@@ -271,7 +295,11 @@ export async function redeemPositions(conditionId: string): Promise<{ success: b
         const wallet = new ethers.Wallet(ENV.PRIVATE_KEY, provider);
         const ct = new ethers.Contract(CONDITIONAL_TOKENS_ADDRESS, CONDITIONAL_TOKENS_ABI, wallet);
 
+<<<<<<< HEAD
+        const collateralToken = COLLATERAL_TOKEN_ADDRESS;
+=======
         const collateralToken = USDC_E_ADDRESS; // Polymarket uses USDC.e
+>>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
         const parentCollectionId = ethers.constants.HashZero;
         // Binary market: indexSets [1, 2] = outcome slot 0 (YES) and slot 1 (NO)
         const indexSets = [1, 2];

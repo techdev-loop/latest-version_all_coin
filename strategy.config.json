@@ -1,10 +1,24 @@
 {
+<<<<<<< HEAD
+    "btcMarketWindowMinutes": 5,
+=======
     "btcMarketWindowMinutes":5, 
+>>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
     "targetPairCostMax": 0.99,
     "safetyMargin": 0.98,
     "strictMaxPairCostInclusive": 0.98,
     "maxPositionPerWindowUsd": 500,
     "orderSizeShares": 1000,
+<<<<<<< HEAD
+    "initialEntryShares": 50,
+    "pairLadderMatchEnabled": true,
+    "pairStockARandomSharesMin": 50,
+    "pairStockARandomSharesMax": 52,
+    "balancedOpenPositionValueStopEnabled": true,
+    "balancedOpenPositionValueStopBandUsd": 20,
+    "firstEntryLossRecoveryFraction": 1,
+    "firstEntryRecoveryBalanceCapFraction": 0.4,
+=======
     "initialEntryShares": 30,
     "pairLadderMatchEnabled": true,
     "pairStockARandomSharesMin": 30,
@@ -13,6 +27,7 @@
     "balancedOpenPositionValueStopBandUsd": 20,
     "firstEntryLossRecoveryFraction": 1,
     "firstEntryRecoveryBalanceCapFraction": 0.45,
+>>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
     "firstEntryBaseBudgetFraction": 0.05,
     "fromThirdPurchaseClipMultiplier": 1.45,
     "orderMinSize": 10,
@@ -22,19 +37,33 @@
     "finalOneSidedHedgeSeconds": 30,
     "momentumInversionHedgeEnabled": true,
     "btcGapSignDeadZoneUsd": 5,
+<<<<<<< HEAD
+  "predictionBtcGapMinAbsUsd": 35,
+=======
   "predictionBtcGapMinAbsUsd": 30,
+>>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
     "marketSlugs": ["btc"],
     "liveTrading": true,
     "livePreferTakerAllEntries": false,
     "liveMakerFallbackToTakerMs": 2500,
+<<<<<<< HEAD
+    "killSwitch": true,
+=======
     "killSwitch": false,
+>>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
     "circuitBreakerFailures": 5,
     "feeBips": 10,
     "binaryOutcomeTakerFeeScalar": 0.072,
     "pairSecondLegMargin": 0.02,
+<<<<<<< HEAD
+    "maxSingleOrderUsd": 52,
+    "orderSpendBalanceFraction": 0.14,
+    "maxClipShares": 52,
+=======
     "maxSingleOrderUsd": 32,
     "orderSpendBalanceFraction": 0.14,
     "maxClipShares": 32,
+>>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
     "sizeLadderShares": [20, 75, 150, 300, 500],
     "forcedSwitchEveryNOrders": 2,
     "marketTiltEpsilon": 0.03,
@@ -50,7 +79,11 @@
     "alternateHedgeFromRound": 2,
     "alternateHedgeClipMinShares": 10,
     "alternateHedgeClipMaxShares": 30,
+<<<<<<< HEAD
+    "dualOutcomeProfitStopUsd": 4,
+=======
     "dualOutcomeProfitStopUsd": 3,
+>>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
     "dualOutcomePurchasePriority": true,
     "takerWhenDualOutcomeVerified": true,
     "earlyDownMomentumHedgeEnabled": true,
@@ -58,7 +91,11 @@
     "earlyDownMomentumMinRisingVelocity": 0,
     "earlyDownMomentumExtraShares": 0,
     "earlyDownMomentumCooldownMs": 45000,
+<<<<<<< HEAD
+    "minDualAfterPnlUsd": 0.65,
+=======
     "minDualAfterPnlUsd": 0.4,
+>>>>>>> 0c668623f48a514f30d33d502550b40d9adb2897
     "minDualAfterPnlStrictAbove": true,
     "aggressiveDualPnlHedgeEnabled": true,
     "aggressiveDualPnlHedgeMinAfterPnlUsd": 1,
