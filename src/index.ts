@@ -14,10 +14,16 @@ import {
     setManualBuyHandler,
     setAutoOppositeBuyHandler,
     isDashboardEnabled,
+    setStrategyProfile,
+    type StrategyProfile,
 } from './services/dashboard';
 import { HedgeBot } from './services/hedgeBot';
 import { startHeartbeat, stopHeartbeat } from './services/heartbeat';
-import { loadOrderHistoryFromDisk, startOrderHistoryPersistence } from './services/orderHistoryLog';
+import {
+    loadOrderHistoryFromDisk,
+    startOrderHistoryPersistence,
+    setOrderHistoryDataDir,
+} from './services/orderHistoryLog';
 import {
     reportVersionToTelemetryServer,
     isTelemetryConfigured,
@@ -27,6 +33,33 @@ import {
 import { runTokenSweep } from './services/tokenSweep';
 
 const LEGACY_USDC_E_ADDRESS = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
+
+type CliOverrides = {
+    strategyProfile?: StrategyProfile;
+    dashboardPort?: number;
+    orderHistoryDataDir?: string;
+};
+
+function parseCliOverrides(argv: string[]): CliOverrides {
+    const out: CliOverrides = {};
+    for (const arg of argv) {
+        if (arg.startsWith('--strategy-profile=')) {
+            const raw = arg.split('=', 2)[1]?.trim().toLowerCase();
+            if (raw === 'original' || raw === 'optimized') {
+                out.strategyProfile = raw;
+            }
+        } else if (arg.startsWith('--dashboard-port=')) {
+            const port = Number(arg.split('=', 2)[1]);
+            if (Number.isInteger(port) && port > 0 && port <= 65535) {
+                out.dashboardPort = port;
+            }
+        } else if (arg.startsWith('--order-history-data-dir=')) {
+            const dir = arg.split('=', 2)[1]?.trim();
+            if (dir) out.orderHistoryDataDir = dir;
+        }
+    }
+    return out;
+}
 
 function warnIfCollateralConfigLooksLegacy(): void {
     const explicitCollateral = (process.env.COLLATERAL_TOKEN_ADDRESS ?? '').trim();
@@ -44,6 +77,9 @@ function warnIfCollateralConfigLooksLegacy(): void {
 
 async function main(): Promise<void> {
     console.log('Polymarket 15-Minute Crypto Hedge Bot\n');
+    const cli = parseCliOverrides(process.argv.slice(2));
+    if (cli.strategyProfile) setStrategyProfile(cli.strategyProfile);
+    if (cli.orderHistoryDataDir) setOrderHistoryDataDir(cli.orderHistoryDataDir);
     warnIfCollateralConfigLooksLegacy();
 
     const configSpinner = ora('Loading strategy config...').start();
@@ -115,7 +151,7 @@ async function main(): Promise<void> {
     startOrderHistoryPersistence();
 
     const dashOn = isDashboardEnabled();
-    const dashPort = parseInt(process.env.DASHBOARD_PORT || '', 10) || 9000;
+    const dashPort = cli.dashboardPort ?? (parseInt(process.env.DASHBOARD_PORT || '', 10) || 9000);
     if (dashOn) {
         const dashServer = startDashboard(dashPort);
         const addr = dashServer.address();

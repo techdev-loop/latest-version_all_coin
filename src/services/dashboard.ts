@@ -718,6 +718,10 @@ let sharedState: DashboardState = {
     liveClobTradesError: null,
 };
 
+export function setStrategyProfile(profile: StrategyProfile): void {
+    sharedState.strategyProfile = profile;
+}
+
 export function updateDashboardState(update: Partial<DashboardState>): void {
     sharedState = { ...sharedState, ...update };
 }

@@ -223,7 +223,7 @@ export class HedgeBot {
     private config: StrategyConfig;
     private readonly optimizedProfileConfig: StrategyConfig;
     private readonly originalProfileOverrides: Partial<StrategyConfig>;
-    private activeStrategyProfile: StrategyProfile = 'original';
+    private activeStrategyProfile: StrategyProfile = 'optimized';
     private client: ClobClient;
     private intervalId: ReturnType<typeof setInterval> | null = null;
     private windowState: WindowState | null = null;
@@ -409,6 +409,8 @@ export class HedgeBot {
             unrestrictedPredictionBuys: true,
             maxOneSidedWindowFraction: undefined,
         };
+        const initialProfile = getDashboardState().strategyProfile;
+        this.applyStrategyProfile(initialProfile);
         this.client = options.clobClient;
         this.orderbookWs =
             this.config.useClobOrderbookWebSocket === true

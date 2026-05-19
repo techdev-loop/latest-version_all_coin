@@ -63,8 +63,8 @@ export interface OrderHistoryEntry {
 const entries: OrderHistoryEntry[] = [];
 let idCounter = 0;
 
-const DATA_DIR = process.env.ORDER_HISTORY_DATA_DIR || path.join(process.cwd(), 'data');
-const SNAPSHOT_FILE = path.join(DATA_DIR, 'order-history.json');
+let dataDir = process.env.ORDER_HISTORY_DATA_DIR || path.join(process.cwd(), 'data');
+let snapshotFile = path.join(dataDir, 'order-history.json');
 
 let persistInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -75,8 +75,8 @@ function nextId(): string {
 
 export function loadOrderHistoryFromDisk(): void {
     try {
-        if (!fs.existsSync(SNAPSHOT_FILE)) return;
-        const raw = JSON.parse(fs.readFileSync(SNAPSHOT_FILE, 'utf8')) as unknown;
+        if (!fs.existsSync(snapshotFile)) return;
+        const raw = JSON.parse(fs.readFileSync(snapshotFile, 'utf8')) as unknown;
         if (!Array.isArray(raw)) return;
         entries.length = 0;
         for (const row of raw) {
@@ -89,8 +89,8 @@ export function loadOrderHistoryFromDisk(): void {
 
 export function flushOrderHistoryToDisk(): void {
     try {
-        if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-        fs.writeFileSync(SNAPSHOT_FILE, JSON.stringify(entries, null, 2), 'utf8');
+        if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+        fs.writeFileSync(snapshotFile, JSON.stringify(entries, null, 2), 'utf8');
     } catch (e) {
         console.warn('[OrderHistory] Could not persist snapshot:', e);
     }
@@ -107,6 +107,13 @@ export function stopOrderHistoryPersistence(): void {
         clearInterval(persistInterval);
         persistInterval = null;
     }
+}
+
+export function setOrderHistoryDataDir(dir: string): void {
+    const normalized = dir.trim();
+    if (!normalized) return;
+    dataDir = path.isAbsolute(normalized) ? normalized : path.resolve(process.cwd(), normalized);
+    snapshotFile = path.join(dataDir, 'order-history.json');
 }
 
 export function pushOrderHistoryEntry(
