@@ -26,6 +26,7 @@ import {
 } from './orderHistoryLog';
 import type { LiveVerifiedBuyTrade } from './clobTradeHistory';
 import { polymarketBinaryTakerFeeUsd } from '../utils/polymarketFees';
+import { getLastSweepResult } from './tokenSweep';
 const DEFAULT_PORT = 9000;
 
 function formatBtcUsdLevelCell(v: number | null | undefined): string {
@@ -1935,6 +1936,9 @@ function buildDashboardLiveInnerHtml(s: DashboardState): string {
       }
     </div>
 
+    <!-- Token Sweep -->
+    ${buildTokenSweepHtml()}
+
     <!-- Footer -->
     <div class="footer">
       <span>Last tick: ${s.lastTick ? new Date(s.lastTick).toLocaleTimeString() : '—'}</span>
@@ -1942,6 +1946,70 @@ function buildDashboardLiveInnerHtml(s: DashboardState): string {
       <a href="/status">JSON API</a>
     </div>
     `;
+}
+
+function buildTokenSweepHtml(): string {
+    const sweep = getLastSweepResult();
+    if (!sweep) {
+        return `
+    <div class="section-title">Token Sweep</div>
+    <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:18px;margin-bottom:24px;">
+      <div style="text-align:center;padding:12px;color:var(--text-muted);font-size:0.85rem;">
+        Token sweep has not run yet (enable in strategy.config.json &rarr; tokenSweep.enabled).
+      </div>
+    </div>`;
+    }
+    const ts = new Date(sweep.timestamp).toLocaleTimeString();
+    const tokRows = sweep.tokensWithBalance
+        .map((t) => {
+            const val = t.valueUsd != null ? '$' + t.valueUsd.toFixed(2) : '?';
+            return `<tr>
+              <td style="padding:6px 10px;font-family:'JetBrains Mono',monospace;font-size:0.78rem;">${t.symbol}</td>
+              <td style="padding:6px 10px;font-family:'JetBrains Mono',monospace;font-size:0.78rem;">${t.balance < 0.0001 ? t.balance.toExponential(2) : t.balance.toFixed(4)}</td>
+              <td style="padding:6px 10px;font-family:'JetBrains Mono',monospace;font-size:0.78rem;">${val}</td>
+              <td style="padding:6px 10px;font-family:'JetBrains Mono',monospace;font-size:0.68rem;color:var(--text-muted);">${t.address.slice(0, 6)}...${t.address.slice(-4)}</td>
+            </tr>`;
+        })
+        .join('');
+
+    const errHtml =
+        sweep.errors.length > 0
+            ? `<div style="margin-top:12px;font-size:0.76rem;color:#f59e0b;line-height:1.5;">${sweep.errors.map((e) => '&bull; ' + e).join('<br>')}</div>`
+            : '';
+
+    const summaryColor = sweep.swapsSucceeded > 0 ? '#10b981' : sweep.swapsAttempted > 0 ? '#f59e0b' : 'var(--text-muted)';
+    const summaryText =
+        sweep.swapsAttempted === 0
+            ? 'No swaps needed'
+            : `${sweep.swapsSucceeded}/${sweep.swapsAttempted} swaps &rarr; ~$${sweep.totalSwappedUsd.toFixed(2)} USDC`;
+
+    return `
+    <div class="section-title">Token Sweep (All Coins &rarr; USDC)</div>
+    <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:18px;margin-bottom:24px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px;">
+        <div style="display:flex;gap:16px;flex-wrap:wrap;">
+          <span style="font-size:0.76rem;color:var(--text-muted);">Scanned: <strong style="color:var(--text-primary);">${sweep.tokensScanned}</strong> tokens</span>
+          <span style="font-size:0.76rem;color:var(--text-muted);">With balance: <strong style="color:var(--text-primary);">${sweep.tokensWithBalance.length}</strong></span>
+          <span style="font-size:0.76rem;color:var(--text-muted);">Native MATIC: <strong style="color:var(--text-primary);">$${sweep.nativeMaticUsd.toFixed(2)}</strong></span>
+        </div>
+        <div style="font-size:0.78rem;font-weight:600;color:${summaryColor};">${summaryText}</div>
+      </div>
+      ${
+          sweep.tokensWithBalance.length > 0
+              ? `<table style="width:100%;border-collapse:collapse;">
+          <tr style="border-bottom:1px solid var(--border);">
+            <th style="padding:6px 10px;text-align:left;font-size:0.68rem;color:var(--text-muted);text-transform:uppercase;">Token</th>
+            <th style="padding:6px 10px;text-align:left;font-size:0.68rem;color:var(--text-muted);text-transform:uppercase;">Balance</th>
+            <th style="padding:6px 10px;text-align:left;font-size:0.68rem;color:var(--text-muted);text-transform:uppercase;">Value</th>
+            <th style="padding:6px 10px;text-align:left;font-size:0.68rem;color:var(--text-muted);text-transform:uppercase;">Address</th>
+          </tr>
+          ${tokRows}
+        </table>`
+              : '<div style="text-align:center;color:var(--text-muted);font-size:0.82rem;padding:8px;">No non-USDC tokens detected.</div>'
+      }
+      ${errHtml}
+      <div style="margin-top:10px;font-size:0.68rem;color:var(--text-muted);">Last sweep: ${ts}</div>
+    </div>`;
 }
 
 function serveHtml(): string {

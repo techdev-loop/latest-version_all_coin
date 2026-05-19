@@ -88,5 +88,13 @@
     "alternatePairCostMax": 0.99,
     "quietConsole": false,
     "paperStartingBalanceUsd": 0,
-    "USE_CLOB_ORDERBOOK_WS": "true"
+    "USE_CLOB_ORDERBOOK_WS": "true",
+    "tokenSweep": {
+        "enabled": true,
+        "minValueUsd": 0.50,
+        "maxSlippagePct": 3,
+        "keepMaticForGas": 0.5,
+        "blocklist": [],
+        "dryRun": false
+    }
 }

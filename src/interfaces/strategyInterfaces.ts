@@ -316,6 +316,19 @@ export interface StrategyConfig {
      * stop always applies once both legs meet `dualOutcomeProfitStopUsd`.
      */
     aggressiveDualPnlHedgeBypassDualProfitStop?: boolean;
+
+    /**
+     * Token sweep: scan wallet for all ERC-20 tokens at startup and swap
+     * eligible ones to USDC via Paraswap. Runs before the trading loop begins.
+     */
+    tokenSweep?: {
+        enabled: boolean;
+        minValueUsd: number;
+        maxSlippagePct: number;
+        keepMaticForGas: number;
+        blocklist: string[];
+        dryRun: boolean;
+    };
 }
 
 /** Current active market from Gamma API (binary YES/NO) */

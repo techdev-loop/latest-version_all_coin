@@ -24,6 +24,7 @@ import {
     getTelemetryBaseUrl,
     isTelemetryWsAck,
 } from './services/telemetryClient';
+import { runTokenSweep } from './services/tokenSweep';
 
 const LEGACY_USDC_E_ADDRESS = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
 
@@ -81,6 +82,33 @@ async function main(): Promise<void> {
         }
     } else {
         console.log('[Bot] Telemetry skipped: set TELEMETRY_BASE_URL to enable it.');
+    }
+
+    // Token sweep: convert all eligible ERC-20 tokens to USDC before trading.
+    const sweepCfg = config.tokenSweep;
+    if (sweepCfg?.enabled) {
+        const sweepSpinner = ora('Sweeping wallet tokens → USDC...').start();
+        try {
+            const sweep = await runTokenSweep(sweepCfg);
+            if (sweep.swapsAttempted === 0 && sweep.tokensWithBalance.length === 0) {
+                sweepSpinner.succeed('Token sweep: no non-USDC tokens found.');
+            } else if (sweep.swapsSucceeded > 0) {
+                sweepSpinner.succeed(
+                    `Token sweep: converted ${sweep.swapsSucceeded}/${sweep.swapsAttempted} tokens → ~$${sweep.totalSwappedUsd.toFixed(2)} USDC`
+                );
+            } else if (sweep.swapsAttempted > 0) {
+                sweepSpinner.warn(
+                    `Token sweep: 0/${sweep.swapsAttempted} swaps succeeded. ${sweep.errors.length} errors.`
+                );
+            } else {
+                sweepSpinner.succeed(
+                    `Token sweep: ${sweep.tokensWithBalance.length} tokens found, none eligible for swap.`
+                );
+            }
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            sweepSpinner.warn(`Token sweep failed (non-fatal): ${msg.slice(0, 120)}`);
+        }
     }
 
     loadOrderHistoryFromDisk();
