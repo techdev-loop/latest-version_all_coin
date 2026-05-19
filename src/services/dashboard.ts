@@ -620,7 +620,7 @@ export function setAutoOppositeBuyHandler(handler: AutoOppositeBuyHandler | null
 let sharedState: DashboardState = {
     running: false,
     killSwitch: false,
-    strategyProfile: 'optimized',
+    strategyProfile: 'original',
     strategyProfileDiffRows: [],
     sessionStartedAtIso: '',
     marketSlug: null,

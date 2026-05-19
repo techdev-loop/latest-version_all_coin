@@ -223,7 +223,7 @@ export class HedgeBot {
     private config: StrategyConfig;
     private readonly optimizedProfileConfig: StrategyConfig;
     private readonly originalProfileOverrides: Partial<StrategyConfig>;
-    private activeStrategyProfile: StrategyProfile = 'optimized';
+    private activeStrategyProfile: StrategyProfile = 'original';
     private client: ClobClient;
     private intervalId: ReturnType<typeof setInterval> | null = null;
     private windowState: WindowState | null = null;
