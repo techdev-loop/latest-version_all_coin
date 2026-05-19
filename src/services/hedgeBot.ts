@@ -465,6 +465,35 @@ export class HedgeBot {
         console.log(`[Bot] Strategy profile switched to ${profile}.`);
     }
 
+    private formatProfileValue(v: unknown): string {
+        if (Array.isArray(v)) return `[${v.map((x) => String(x)).join(', ')}]`;
+        if (v == null) return 'undefined';
+        if (typeof v === 'number') return Number.isFinite(v) ? String(v) : 'NaN';
+        if (typeof v === 'boolean') return v ? 'true' : 'false';
+        return String(v);
+    }
+
+    private getStrategyProfileDiffRows(): Array<{
+        key: string;
+        optimized: string;
+        original: string;
+        current: string;
+    }> {
+        const out: Array<{ key: string; optimized: string; original: string; current: string }> = [];
+        for (const [k, origVal] of Object.entries(this.originalProfileOverrides)) {
+            const key = k as keyof StrategyConfig;
+            const optimizedVal = this.optimizedProfileConfig[key];
+            const currentVal = this.config[key];
+            out.push({
+                key: String(key),
+                optimized: this.formatProfileValue(optimizedVal),
+                original: this.formatProfileValue(origVal),
+                current: this.formatProfileValue(currentVal),
+            });
+        }
+        return out.sort((a, b) => a.key.localeCompare(b.key));
+    }
+
     private clearActivePendingOrder(): void {
         if (!this.activePendingOrder) return;
         const remaining = Math.max(
@@ -2663,6 +2692,7 @@ export class HedgeBot {
         const decision60s = this.pickDecisionAtOffset(60_000);
         return {
             strategyProfile: this.activeStrategyProfile,
+            strategyProfileDiffRows: this.getStrategyProfileDiffRows(),
             walletBalanceUsdc: this.config.liveTrading ? this.cachedBalances.publicWalletUsdc : 0,
             polymarketBalanceUsdc: balanceUsdc,
             totalBalanceUsdc,

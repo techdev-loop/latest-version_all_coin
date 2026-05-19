@@ -419,6 +419,12 @@ export interface DashboardState {
     running: boolean;
     killSwitch: boolean;
     strategyProfile: StrategyProfile;
+    strategyProfileDiffRows: Array<{
+        key: string;
+        optimized: string;
+        original: string;
+        current: string;
+    }>;
     /** ISO timestamp when this bot process started (used to session-scope live history). */
     sessionStartedAtIso: string;
     marketSlug: string | null;
@@ -615,6 +621,7 @@ let sharedState: DashboardState = {
     running: false,
     killSwitch: false,
     strategyProfile: 'optimized',
+    strategyProfileDiffRows: [],
     sessionStartedAtIso: '',
     marketSlug: null,
     windowEndIso: null,
@@ -1147,6 +1154,26 @@ function buildDashboardLiveInnerHtml(s: DashboardState): string {
             Strategy: ${s.strategyProfile === 'optimized' ? 'Optimized' : 'Original'} (Click to switch)
           </button>
         </form>
+        <div style="margin:0 0 10px;padding:10px;border:1px solid rgba(148,163,184,0.25);border-radius:8px;background:rgba(15,23,42,0.35);">
+          <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;">Profile Differences</div>
+          ${
+              s.strategyProfileDiffRows.length > 0
+                  ? `
+          <div style="display:grid;grid-template-columns:1fr;gap:5px;max-height:150px;overflow:auto;padding-right:4px;">
+            ${s.strategyProfileDiffRows
+                .map(
+                    (r) => `<div style="font-size:0.72rem;line-height:1.35;">
+              <span style="color:#cbd5e1;font-family:'JetBrains Mono',monospace;">${r.key}</span>:
+              <span style="color:#22d3ee;">opt ${escapeHtml(r.optimized)}</span> ·
+              <span style="color:#f59e0b;">orig ${escapeHtml(r.original)}</span> ·
+              <span style="color:#10b981;">now ${escapeHtml(r.current)}</span>
+            </div>`
+                )
+                .join('')}
+          </div>`
+                  : `<div style="font-size:0.74rem;color:var(--text-muted);">No profile differences configured.</div>`
+          }
+        </div>
         <div class="floating-entry-controls">
           <label for="fixedSignalPos">Position</label>
           <select id="fixedSignalPos">
