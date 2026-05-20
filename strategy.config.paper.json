@@ -1,7 +1,7 @@
 {
   "btcMarketWindowMinutes": 5,
-  "targetPairCostMax": 0.995,
-  "safetyMargin": 0.98,
+  "targetPairCostMax": 0.985,
+  "safetyMargin": 0.975,
   "maxPositionPerWindowUsd": 100,
   "orderSizeShares": 10,
   "orderMinSize": 5,
@@ -16,11 +16,18 @@
   "maxSingleOrderUsd": 10,
   "maxClipShares": 54,
   "sizeLadderShares": [2, 8, 20, 35, 54],
-  "forcedSwitchEveryNOrders": 4,
+  "forcedSwitchEveryNOrders": 0,
   "marketTiltEpsilon": 0.02,
   "pairTiltImbalanceShares": 10,
   "pairTiltMinElapsedSeconds": 0,
   "windowEntryWarmupSeconds": 0,
   "quietConsole": false,
-  "paperStartingBalanceUsd": 4892
+  "paperStartingBalanceUsd": 4892,
+  "predictionBtcGapMinAbsUsd": 30,
+  "minDualAfterPnlUsd": 0.9,
+  "minDualAfterPnlStrictAbove": true,
+  "firstEntryExpensiveSideFlipEnabled": false,
+  "immediateOppositePairCostMax": 0.97,
+  "immediateImpliedPairMinDualAfterPnlUsd": 1.0,
+  "aggressiveDualPnlHedgeEnabled": false
 }

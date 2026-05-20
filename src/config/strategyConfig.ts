@@ -85,6 +85,8 @@ const defaults: StrategyConfig = {
     balancedOpenPositionValueStopEnabled: true,
     balancedOpenPositionValueStopBandUsd: 20,
     immediateImpliedPairCostHedgeEnabled: true,
+    immediateImpliedPairMinDualAfterPnlUsd: 0.9,
+    firstEntryExpensiveSideFlipEnabled: false,
 };
 
 /** Env set (any non-empty value) wins over JSON; unset means “use file default”. */
@@ -289,6 +291,10 @@ export function loadStrategyConfig(): StrategyConfig {
         firstEntryLossRecoveryFraction: file.firstEntryLossRecoveryFraction,
         firstEntryRecoveryBalanceCapFraction: file.firstEntryRecoveryBalanceCapFraction,
         firstEntryBaseBudgetFraction: file.firstEntryBaseBudgetFraction,
+        firstEntryExpensiveSideFlipEnabled:
+            boolFromEnv('FIRST_ENTRY_EXPENSIVE_SIDE_FLIP_ENABLED') ??
+            file.firstEntryExpensiveSideFlipEnabled ??
+            defaults.firstEntryExpensiveSideFlipEnabled,
         fromThirdPurchaseClipMultiplier: file.fromThirdPurchaseClipMultiplier,
         alternateHedgeFromRound: file.alternateHedgeFromRound,
         alternateHedgeClipMinShares: file.alternateHedgeClipMinShares,
@@ -405,6 +411,10 @@ export function loadStrategyConfig(): StrategyConfig {
         immediateImpliedPairCostHedgeEnabled:
             file.immediateImpliedPairCostHedgeEnabled ?? defaults.immediateImpliedPairCostHedgeEnabled,
         immediateOppositePairCostMax: file.immediateOppositePairCostMax,
+        immediateImpliedPairMinDualAfterPnlUsd:
+            (fromEnv('IMMEDIATE_IMPLIED_PAIR_MIN_DUAL_AFTER_PNL_USD', parseFloat) as number) ??
+            file.immediateImpliedPairMinDualAfterPnlUsd ??
+            defaults.immediateImpliedPairMinDualAfterPnlUsd,
         maxOneSidedWindowFraction: file.maxOneSidedWindowFraction,
         tokenSweep: file.tokenSweep,
     };

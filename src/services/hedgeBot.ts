@@ -3643,6 +3643,29 @@ export class HedgeBot {
         });
         if (shares < minSz) return false;
         if (shares !== targetImb) return false;
+        const immMinDual = Math.max(
+            this.config.immediateImpliedPairMinDualAfterPnlUsd ?? 0.9,
+            minDualAfterPnlUsd(this.config)
+        );
+        const immStrict = minDualAfterPnlStrictAbove(this.config);
+        const immProjected = projectedAfterPnlsAfterBuy(
+            state,
+            hedgeSide,
+            shares,
+            askPx,
+            this.config,
+            'TAKER'
+        );
+        if (
+            !dualAfterPnlMeetsMin(
+                immProjected.afterPnlIfUp,
+                immProjected.afterPnlIfDown,
+                immMinDual,
+                immStrict
+            )
+        ) {
+            return false;
+        }
 
         const ts = this.config.tickSize || 0.01;
         const limitPx = Math.min(0.99, Math.round((askPx + ts) * 100) / 100);
@@ -4900,6 +4923,7 @@ export class HedgeBot {
         if (
             !pairHedgeMode &&
             this.config.btcMarketWindowMinutes === 5 &&
+            this.config.firstEntryExpensiveSideFlipEnabled === true &&
             (this.roundsThisWindow === 0 || (alternateHedgeActive && alternateBookRound))
         ) {
             const chosenPrice = side === 'YES' ? bestBidYes : bestBidNo;

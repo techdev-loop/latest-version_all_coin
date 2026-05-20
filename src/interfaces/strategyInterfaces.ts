@@ -61,6 +61,11 @@ export interface StrategyConfig {
     firstEntryRecoveryBalanceCapFraction?: number;
     /** When the prior window was flat or profitable, cap first-order notional to this fraction of balance (small probe). Default 0.05. */
     firstEntryBaseBudgetFraction?: number;
+    /**
+     * 5m first-entry override guard: if true, when the chosen leg is already expensive and top bid depth is thin,
+     * flip to the opposite leg for the first order. Default false to avoid buying weak-probability reversals.
+     */
+    firstEntryExpensiveSideFlipEnabled?: boolean;
     /** Multiply clip size for orders from the 3rd purchase onward (roundsThisWindow ≥ 2). Default 1.4. */
     /** Applied only to ladder Stock A clips (round ≥ 2); Stock B hedges are never multiplied so A/B sizes stay matched. */
     fromThirdPurchaseClipMultiplier?: number;
@@ -209,6 +214,12 @@ export interface StrategyConfig {
     immediateImpliedPairCostHedgeEnabled?: boolean;
     /** Implied pair ceiling for {@link immediateImpliedPairCostHedgeEnabled}; omit to use min(safetyMargin, 0.98). */
     immediateOppositePairCostMax?: number;
+    /**
+     * Additional quality floor for immediate implied-pair taker hedges:
+     * after simulated hedge, both After PnL If Up/Down must meet this USD threshold (fee-inclusive).
+     * Default max(minDualAfterPnlUsd, 0.9) when omitted.
+     */
+    immediateImpliedPairMinDualAfterPnlUsd?: number;
     /**
      * When true, if long Up only and Down best ask is rising (orderbook momentum), extrapolate that Down
      * will stay above `earlyDownMomentumAskFloorUsd` before expiry and FOK-buy Down (imbalance + extra)
