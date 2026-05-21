@@ -333,6 +333,46 @@ export interface StrategyConfig {
      * E.g. 0.6 = if one-sided for 60% of the window, force hedge. Default 0.6.
      */
     maxOneSidedWindowFraction?: number;
+    /**
+     * Master switch for defensive risk gates (window loss stop, session drawdown stop, de-risk sizing).
+     * Default true.
+     */
+    safeModeEnabled?: boolean;
+    /**
+     * Stop opening new orders in the current window when worst-case settlement P/L (min(After PnL If Up, If Down))
+     * drops to or below `-windowWorstCaseLossStopUsd`. Default 12.
+     */
+    windowWorstCaseLossStopUsd?: number;
+    /**
+     * Stop opening new orders for the session when session P/L is at or below `-sessionDrawdownStopUsd`.
+     * Default 120.
+     */
+    sessionDrawdownStopUsd?: number;
+    /**
+     * Start de-risk mode (smaller clips, no first-order loss-recovery sizing, tighter auxiliary paths)
+     * when session P/L is at or below `-deRiskDrawdownStartUsd`. Default 60.
+     */
+    deRiskDrawdownStartUsd?: number;
+    /**
+     * Clip shrink factor applied in de-risk mode (0,1]. Example 0.5 halves requested shares.
+     * Default 0.5.
+     */
+    deRiskClipFraction?: number;
+    /**
+     * Enter risk-off rebalancing mode when worst-case settlement P/L (min(After PnL If Up, If Down))
+     * is at or below `-riskOffWorstCasePnlUsd`. Default 8.
+     */
+    riskOffWorstCasePnlUsd?: number;
+    /**
+     * In risk-off mode, freeze new Stock A accumulation when absolute inventory imbalance exceeds this many shares.
+     * Default 35.
+     */
+    maxUnmatchedSharesBeforeFreeze?: number;
+    /**
+     * In risk-off mode, allow hedge clips to bypass pair-cost / dual-after-PnL gates so imbalance can be reduced.
+     * Default true.
+     */
+    riskOffBypassHedgeGates?: boolean;
 
     /**
      * Token sweep: scan wallet for all ERC-20 tokens at startup and swap

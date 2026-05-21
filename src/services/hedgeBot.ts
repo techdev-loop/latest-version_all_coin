@@ -390,24 +390,25 @@ export class HedgeBot {
         this.config = options.config;
         this.optimizedProfileConfig = { ...options.config };
         this.originalProfileOverrides = {
-            safetyMargin: 0.98,
-            strictMaxPairCostInclusive: 0.98,
-            orderSizeShares: 1000,
-            initialEntryShares: 50,
-            pairStockARandomSharesMin: 50,
-            pairStockARandomSharesMax: 52,
+            safetyMargin: 0.975,
+            strictMaxPairCostInclusive: 0.97,
+            orderSizeShares: 200,
+            initialEntryShares: 30,
+            pairStockARandomSharesMin: 20,
+            pairStockARandomSharesMax: 30,
             stopTradingSecondsBeforeEnd: 90,
-            maxSingleOrderUsd: 52,
-            maxClipShares: 52,
+            maxSingleOrderUsd: 35,
+            maxClipShares: 35,
             sizeLadderShares: [20, 75, 150, 300, 500],
             dualOutcomeProfitStopUsd: 4,
-            minDualAfterPnlUsd: 0.65,
+            minDualAfterPnlUsd: 0.9,
+            aggressiveDualPnlHedgeEnabled: false,
             aggressiveDualPnlHedgeMinAfterPnlUsd: 1,
             predictionBtcGapMinAbsUsd: 35,
             momentumBiasGapUsd: 35,
             momentumAllowDownGapUsd: -35,
-            unrestrictedPredictionBuys: true,
-            maxOneSidedWindowFraction: undefined,
+            unrestrictedPredictionBuys: false,
+            maxOneSidedWindowFraction: 0.3,
         };
         const initialProfile = getDashboardState().strategyProfile;
         this.applyStrategyProfile(initialProfile);
@@ -2887,6 +2888,62 @@ export class HedgeBot {
         };
     }
 
+    private getSafeModeRiskState(state: WindowState): {
+        enabled: boolean;
+        imbalanceShares: number;
+        worstCaseAfterPnlUsd: number;
+        sessionPnlUsd: number;
+        windowLossStopTriggered: boolean;
+        sessionDrawdownStopTriggered: boolean;
+        deRiskActive: boolean;
+        riskOffActive: boolean;
+        freezeStockAByImbalance: boolean;
+        bypassHedgeGatesInRiskOff: boolean;
+        deRiskClipFraction: number;
+    } {
+        const enabled = this.config.safeModeEnabled !== false;
+        const imbalanceShares = Math.abs(state.qtyYes - state.qtyNo);
+        const ap = afterPnlsFromState(state);
+        const worstCaseAfterPnlUsd = Math.min(ap.afterPnlIfUp, ap.afterPnlIfDown);
+        const accounting = this.getAccountingSnapshot(state);
+        const sessionPnlUsd = accounting.sessionPnlUsd;
+        const windowStop = this.config.windowWorstCaseLossStopUsd ?? 12;
+        const drawdownStop = this.config.sessionDrawdownStopUsd ?? 120;
+        const deRiskStart = this.config.deRiskDrawdownStartUsd ?? 60;
+        const riskOffWorstCase = this.config.riskOffWorstCasePnlUsd ?? 8;
+        const maxUnmatched = this.config.maxUnmatchedSharesBeforeFreeze ?? 35;
+        const clipFracRaw = this.config.deRiskClipFraction ?? 0.5;
+        const deRiskClipFraction = Math.max(0.1, Math.min(1, clipFracRaw));
+        const windowLossStopTriggered =
+            enabled && windowStop > 0 && worstCaseAfterPnlUsd <= -windowStop + 1e-9;
+        const sessionDrawdownStopTriggered =
+            enabled && drawdownStop > 0 && sessionPnlUsd <= -drawdownStop + 1e-9;
+        const riskOffActive =
+            enabled && riskOffWorstCase > 0 && worstCaseAfterPnlUsd <= -riskOffWorstCase + 1e-9;
+        const deRiskActive =
+            enabled &&
+            !sessionDrawdownStopTriggered &&
+            deRiskStart > 0 &&
+            sessionPnlUsd <= -deRiskStart + 1e-9;
+        const freezeStockAByImbalance =
+            enabled && maxUnmatched > 0 && imbalanceShares > maxUnmatched + 1e-9;
+        const bypassHedgeGatesInRiskOff =
+            this.config.riskOffBypassHedgeGates !== false && riskOffActive;
+        return {
+            enabled,
+            imbalanceShares,
+            worstCaseAfterPnlUsd,
+            sessionPnlUsd,
+            windowLossStopTriggered,
+            sessionDrawdownStopTriggered,
+            deRiskActive,
+            riskOffActive,
+            freezeStockAByImbalance,
+            bypassHedgeGatesInRiskOff,
+            deRiskClipFraction,
+        };
+    }
+
     /** Snapshot row for downloadable order history (Excel / JSON). */
     private recordOrderHistorySnapshot(
         market: ActiveMarket,
@@ -2964,7 +3021,8 @@ export class HedgeBot {
         state: WindowState,
         secondsLeft: number,
         q: boolean,
-        kind: 'final' | 'momentum' | 'forced'
+        kind: 'final' | 'momentum' | 'forced',
+        opts?: { riskOffBypassGates?: boolean }
     ): Promise<boolean> {
         const absCut = this.config.absoluteNoOrderSeconds ?? 2;
         const finalSec = this.config.finalOneSidedHedgeSeconds ?? 30;
@@ -3029,8 +3087,39 @@ export class HedgeBot {
             }
         );
         if (d === null) return false;
+        let hedgeAction: StrategyDecision = d;
+        if (hedgeAction.action === 'HOLD' && opts?.riskOffBypassGates === true) {
+            const zRisk = 1e-8;
+            const oneSidedYes = state.qtyYes > zRisk && state.qtyNo <= zRisk;
+            const oneSidedNo = state.qtyNo > zRisk && state.qtyYes <= zRisk;
+            if (oneSidedYes || oneSidedNo) {
+                const forcedSide: 'YES' | 'NO' = oneSidedYes ? 'NO' : 'YES';
+                const forcedAsk = forcedSide === 'YES' ? (bookYes.bestAsk ?? 0) : (bookNo.bestAsk ?? 0);
+                const target = Math.floor(oneSidedYes ? state.qtyYes : state.qtyNo);
+                const forcedShares = clampBuySizeForSimulatedGates(
+                    state,
+                    forcedSide,
+                    forcedAsk,
+                    target,
+                    this.config,
+                    {
+                        bypassPairCostAndSettlement: true,
+                        simulatedFillLiquidity: 'TAKER',
+                    }
+                );
+                if (forcedAsk > 0 && forcedShares > 0) {
+                    hedgeAction = {
+                        action: forcedSide === 'YES' ? 'BUY_YES' : 'BUY_NO',
+                        tokenId: forcedSide === 'YES' ? market.yesTokenId : market.noTokenId,
+                        price: forcedAsk,
+                        size: forcedShares,
+                        reason: `Risk-off forced hedge bypass`,
+                    };
+                }
+            }
+        }
 
-        if (d.action === 'HOLD') {
+        if (hedgeAction.action === 'HOLD') {
             this.holdsThisWindow++;
             updateDashboardState({
                 ...this.getDashboardExtras(),
@@ -3039,16 +3128,16 @@ export class HedgeBot {
                 consecutiveFailures: this.riskState.consecutiveOrderFailures,
                 pendingOrders: 0,
                 lastTick: new Date().toISOString(),
-                message: `${tag} HEDGE: ${d.reason}`,
+                message: `${tag} HEDGE: ${hedgeAction.reason}`,
             });
             return true;
         }
 
-        const side = d.action === 'BUY_YES' ? ('YES' as const) : ('NO' as const);
+        const side = hedgeAction.action === 'BUY_YES' ? ('YES' as const) : ('NO' as const);
         const sideLabel = side === 'YES' ? 'Up' : 'Down';
         const ts = this.config.tickSize || 0.01;
-        const limitPx = Math.min(0.99, Math.round((d.price + ts) * 100) / 100);
-        const orderCost = limitPx * d.size;
+        const limitPx = Math.min(0.99, Math.round((hedgeAction.price + ts) * 100) / 100);
+        const orderCost = limitPx * hedgeAction.size;
         const reasonCode =
             kind === 'momentum'
                 ? 'MOMENTUM_FLIP_HEDGE'
@@ -3060,7 +3149,7 @@ export class HedgeBot {
         const tokenId = side === 'YES' ? market.yesTokenId : market.noTokenId;
         qlog(
             q,
-            `[${tag} hedge #${roundNum}] ${sideLabel} ${d.size}sh @ ask ~$${d.price.toFixed(2)} ($${orderCost.toFixed(2)}) | ${secondsLeft}s left`
+            `[${tag} hedge #${roundNum}] ${sideLabel} ${hedgeAction.size}sh @ ask ~$${hedgeAction.price.toFixed(2)} ($${orderCost.toFixed(2)}) | ${secondsLeft}s left`
         );
 
         const bookSnap = {
@@ -3079,8 +3168,8 @@ export class HedgeBot {
             oneSidedInstant = await buyInstant(
                 this.client,
                 tokenId,
-                d.price,
-                d.size,
+                hedgeAction.price,
+                hedgeAction.size,
                 this.config,
                 !!market.negRisk,
                 { marketConditionId: market.conditionId }
@@ -3097,7 +3186,7 @@ export class HedgeBot {
         }
 
         const acct1 = this.resolveLiveFokAccounting(this.config.liveTrading, oneSidedInstant, {
-            shares: d.size,
+            shares: hedgeAction.size,
             price: limitPx,
             costUsd: orderCost,
         });
@@ -3133,7 +3222,7 @@ export class HedgeBot {
             pendingOrders: this.activePendingOrder ? 1 : 0,
             lastTick: new Date().toISOString(),
             message:
-                `${label}: ${sideLabel} ${acct1.shares}@ask ~$${d.price.toFixed(2)} | ` +
+                `${label}: ${sideLabel} ${acct1.shares}@ask ~$${hedgeAction.price.toFixed(2)} | ` +
                 `Up=${wsOut.qtyYes} Down=${wsOut.qtyNo} | ${secondsLeft}s left`,
         });
         this.options.onStateChange?.(wsOut, this.riskState);
@@ -4481,6 +4570,7 @@ export class HedgeBot {
         const pairImbForSkip = pairLadderOn ? this.pairQtyImbalanceShares(state) : 0;
         /** Pair mode: while imbalanced, only the main path may trade (exact hedge size). */
         const pairLadderSkipAuxiliary = pairLadderOn && pairImbForSkip > 0;
+        const safeRisk = this.getSafeModeRiskState(state);
 
         // Dual-leg: if either After PnL is below $0, do not place any new orders. Check both internal
         // window state and fill-aggregated display state (dashboard) so live chain-imputed costs cannot
@@ -4544,9 +4634,21 @@ export class HedgeBot {
                 state,
                 secondsLeft,
                 q,
-                'forced'
+                'forced',
+                { riskOffBypassGates: safeRisk.bypassHedgeGatesInRiskOff }
             );
             if (forceHandled) return;
+        }
+        if (safeRisk.riskOffActive) {
+            const riskOffForced = await this.tryExecuteOneSidedFokHedge(
+                market,
+                state,
+                secondsLeft,
+                q,
+                'forced',
+                { riskOffBypassGates: safeRisk.bypassHedgeGatesInRiskOff }
+            );
+            if (riskOffForced) return;
         }
 
         // ══════════════════════════════════════════════════════════════════
@@ -4601,6 +4703,37 @@ export class HedgeBot {
                 'final'
             );
             if (finalHedgeHandled) return;
+        }
+
+        if (safeRisk.sessionDrawdownStopTriggered) {
+            this.holdsThisWindow++;
+            updateDashboardState({
+                ...this.getDashboardExtras(),
+                marketSlug: market.slug,
+                windowEndIso: market.endDateIso,
+                consecutiveFailures: this.riskState.consecutiveOrderFailures,
+                pendingOrders: this.activePendingOrder ? 1 : 0,
+                lastTick: new Date().toISOString(),
+                message:
+                    `SAFE MODE: session drawdown stop hit (session P/L $${safeRisk.sessionPnlUsd.toFixed(2)} ≤ -$${(this.config.sessionDrawdownStopUsd ?? 120).toFixed(2)}) ` +
+                    `— no new entries until recovery/restart`,
+            });
+            return;
+        }
+        if (safeRisk.windowLossStopTriggered) {
+            this.holdsThisWindow++;
+            updateDashboardState({
+                ...this.getDashboardExtras(),
+                marketSlug: market.slug,
+                windowEndIso: market.endDateIso,
+                consecutiveFailures: this.riskState.consecutiveOrderFailures,
+                pendingOrders: this.activePendingOrder ? 1 : 0,
+                lastTick: new Date().toISOString(),
+                message:
+                    `SAFE MODE: window worst-case stop hit (min After PnL $${safeRisk.worstCaseAfterPnlUsd.toFixed(2)} ≤ -$${(this.config.windowWorstCaseLossStopUsd ?? 12).toFixed(2)}) ` +
+                    `— no new entries this window`,
+            });
+            return;
         }
 
         if (secondsLeft <= HARD_CUTOFF_SECONDS) {
@@ -4716,14 +4849,21 @@ export class HedgeBot {
         // Note: we do NOT hard-gate on (bidYES + bidNO) anymore (closer to reference wallet).
 
         if (books !== null && !pairLadderSkipAuxiliary) {
-            const aggressiveHandled = await this.tryExecuteAggressiveDualPnlHedge(
-                market,
-                this.windowState!,
-                secondsLeft,
-                books,
-                q
-            );
-            if (aggressiveHandled) return;
+            if (safeRisk.deRiskActive) {
+                qlog(
+                    q,
+                    `[Bot] De-risk mode active (session P/L $${safeRisk.sessionPnlUsd.toFixed(2)}): aggressive dual hedge disabled this tick`
+                );
+            } else {
+                const aggressiveHandled = await this.tryExecuteAggressiveDualPnlHedge(
+                    market,
+                    this.windowState!,
+                    secondsLeft,
+                    books,
+                    q
+                );
+                if (aggressiveHandled) return;
+            }
         }
 
         if (
@@ -4983,6 +5123,17 @@ export class HedgeBot {
             }
         }
 
+        if (safeRisk.riskOffActive && safeRisk.imbalanceShares > 0) {
+            const rebalanceSide: 'YES' | 'NO' = state.qtyYes < state.qtyNo ? 'YES' : 'NO';
+            if (side !== rebalanceSide) {
+                side = rebalanceSide;
+                sideLabel = side === 'YES' ? 'Up' : 'Down';
+                currentBid = side === 'YES' ? bestBidYes : bestBidNo;
+                tokenId = side === 'YES' ? market.yesTokenId : market.noTokenId;
+            }
+            orderReasonCode = `${orderReasonCode}|RISK_OFF_REBALANCE`;
+        }
+
         const zPairEq = 1e-8;
         const pairLadderQtyEqualOrEmpty =
             pairLadderOn &&
@@ -4996,7 +5147,8 @@ export class HedgeBot {
                     Math.abs(state.qtyYes - state.qtyNo) <= zPairEq));
 
         if (pairLadderQtyEqualOrEmpty) {
-            const predGate = this.config.predictionBtcGapMinAbsUsd ?? 25;
+            const predGateBase = this.config.predictionBtcGapMinAbsUsd ?? 25;
+            const predGate = safeRisk.deRiskActive ? Math.max(predGateBase, 35) : predGateBase;
             if (btcDelta == null || !Number.isFinite(btcDelta) || Math.abs(btcDelta) < predGate - 1e-9) {
                 this.holdsThisWindow++;
                 updateDashboardState({
@@ -5107,10 +5259,15 @@ export class HedgeBot {
                 ? this.cachedBalances.polymarketUsdc
                 : getSimulatedBalance();
             const maxOrd = this.config.maxSingleOrderUsd ?? Number.POSITIVE_INFINITY;
-            const lossFrac = this.config.firstEntryLossRecoveryFraction ?? 1;
+            const lossFrac = safeRisk.deRiskActive
+                ? 0
+                : (this.config.firstEntryLossRecoveryFraction ?? 1);
             const capFrac = this.config.firstEntryRecoveryBalanceCapFraction ?? 0.5;
-            const baseBudgetFrac =
+            const baseBudgetBase =
                 this.config.firstEntryBaseBudgetFraction ?? FIRST_ENTRY_PAPER_SPEND_FRACTION;
+            const baseBudgetFrac = safeRisk.deRiskActive
+                ? Math.min(baseBudgetBase, 0.03)
+                : baseBudgetBase;
 
             let recoveryShares = 0;
             if (
@@ -5144,6 +5301,9 @@ export class HedgeBot {
                         `${orderReasonCode}|LOSS_RECOVERY_LAST_NET=$${this.lastCompletedWindowNetProfitUsd!.toFixed(2)}` +
                         `|recov~${recoveryShares}sh`;
                 }
+                if (safeRisk.deRiskActive) {
+                    orderReasonCode = `${orderReasonCode}|DE_RISK_FIRST_ENTRY`;
+                }
             } else {
                 const baseInitial = Math.floor(this.config.initialEntryShares ?? 10);
                 const floorShares = Math.max(minSz, baseInitial);
@@ -5163,6 +5323,9 @@ export class HedgeBot {
                         `${orderReasonCode}|LOSS_RECOVERY_LAST_NET=$${this.lastCompletedWindowNetProfitUsd!.toFixed(2)}` +
                         `|recov~${recoveryShares}sh`;
                 }
+                if (safeRisk.deRiskActive) {
+                    orderReasonCode = `${orderReasonCode}|DE_RISK_FIRST_ENTRY`;
+                }
             }
         }
 
@@ -5171,6 +5334,22 @@ export class HedgeBot {
         // Pair ladder: every Stock A leg uses the momentum-sized `[pairStockARandomSharesMin, Max]` band only — never apply the multiplier
         // (would blow past Max when the book was imbalanced because pairImbForSkip ≠ 0).
         const stockBHedgeClip = requiresMinDualAfterPnlForSimulatedBuy(state, side);
+        if (safeRisk.freezeStockAByImbalance && !stockBHedgeClip) {
+            this.holdsThisWindow++;
+            updateDashboardState({
+                ...this.getDashboardExtras(),
+                marketSlug: market.slug,
+                windowEndIso: market.endDateIso,
+                consecutiveFailures: this.riskState.consecutiveOrderFailures,
+                pendingOrders: this.activePendingOrder ? 1 : 0,
+                lastTick: new Date().toISOString(),
+                message:
+                    `SAFE MODE: inventory imbalance ${safeRisk.imbalanceShares.toFixed(0)} > ${(
+                        this.config.maxUnmatchedSharesBeforeFreeze ?? 35
+                    ).toFixed(0)} — freeze Stock A entries, waiting for hedge rebalance`,
+            });
+            return;
+        }
         const pairStockAClip = pairLadderOn && !stockBHedgeClip;
         if (
             this.roundsThisWindow >= 2 &&
@@ -5181,6 +5360,14 @@ export class HedgeBot {
             const mult = this.config.fromThirdPurchaseClipMultiplier ?? 1.4;
             shares = Math.max(1, Math.floor(shares * mult));
             orderReasonCode = `${orderReasonCode}|FROM_ROUND3+_x${mult}`;
+        }
+        if (safeRisk.deRiskActive && shares > 0) {
+            const minSz = Math.max(market.orderMinSize || 0, this.config.orderMinSize || 1);
+            const shrunk = Math.max(minSz, Math.floor(shares * safeRisk.deRiskClipFraction));
+            if (shrunk < shares) {
+                orderReasonCode = `${orderReasonCode}|DE_RISK_CLIP_${shares}→${shrunk}`;
+                shares = shrunk;
+            }
         }
 
         const diff = Math.abs(state.qtyYes - state.qtyNo);
@@ -5316,10 +5503,11 @@ export class HedgeBot {
         }
 
         if (skewDecision === null) {
+            const hedgeLegMain = requiresMinDualAfterPnlForSimulatedBuy(state, side);
             const bypassGates =
-                this.config.unrestrictedPredictionBuys === true &&
-                !requiresMinDualAfterPnlForSimulatedBuy(state, side);
-            const hedgeLegPairClamp = requiresMinDualAfterPnlForSimulatedBuy(state, side);
+                (this.config.unrestrictedPredictionBuys === true && !hedgeLegMain) ||
+                (safeRisk.bypassHedgeGatesInRiskOff && hedgeLegMain);
+            const hedgeLegPairClamp = hedgeLegMain;
             const hedgeTargetBeforePairClamp = hedgeLegPairClamp ? shares : null;
             const clampCfgMain = alternateHedgeActive ? this.configForAlternatePairClamp() : this.config;
             const firstLegOppMain = this.oppositeAskAllInFirstLegGate(state, side, books, clampCfgMain);
@@ -5348,7 +5536,8 @@ export class HedgeBot {
                 hedgeTargetBeforePairClamp != null &&
                 hedgeTargetBeforePairClamp > 0 &&
                 shares > 0 &&
-                shares < hedgeTargetBeforePairClamp
+                shares < hedgeTargetBeforePairClamp &&
+                !safeRisk.bypassHedgeGatesInRiskOff
             ) {
                 shares = 0;
                 orderReasonCode = `${orderReasonCode}|HEDGE_NO_PARTIAL_PAIR_CAP`;
@@ -5378,9 +5567,10 @@ export class HedgeBot {
             const { lo: plStockBLo } = this.pairStockARandomClipBounds(market, bestBidYes, bestBidNo);
             if (shares < plStockBLo) {
                 const beforeBFloor = shares;
+                const hedgeLegB = requiresMinDualAfterPnlForSimulatedBuy(state, side);
                 const bypassGatesB =
-                    this.config.unrestrictedPredictionBuys === true &&
-                    !requiresMinDualAfterPnlForSimulatedBuy(state, side);
+                    (this.config.unrestrictedPredictionBuys === true && !hedgeLegB) ||
+                    (safeRisk.bypassHedgeGatesInRiskOff && hedgeLegB);
                 const clampCfgB = alternateHedgeActive ? this.configForAlternatePairClamp() : this.config;
                 const oppB = this.oppositeAskAllInFirstLegGate(state, side, books, clampCfgB);
                 const oppBidB = this.oppositeBidFirstLegGate(state, side, books);

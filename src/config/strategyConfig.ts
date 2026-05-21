@@ -87,6 +87,14 @@ const defaults: StrategyConfig = {
     immediateImpliedPairCostHedgeEnabled: true,
     immediateImpliedPairMinDualAfterPnlUsd: 0.9,
     firstEntryExpensiveSideFlipEnabled: false,
+    safeModeEnabled: true,
+    windowWorstCaseLossStopUsd: 12,
+    sessionDrawdownStopUsd: 120,
+    deRiskDrawdownStartUsd: 60,
+    deRiskClipFraction: 0.5,
+    riskOffWorstCasePnlUsd: 8,
+    maxUnmatchedSharesBeforeFreeze: 35,
+    riskOffBypassHedgeGates: true,
 };
 
 /** Env set (any non-empty value) wins over JSON; unset means “use file default”. */
@@ -295,6 +303,36 @@ export function loadStrategyConfig(): StrategyConfig {
             boolFromEnv('FIRST_ENTRY_EXPENSIVE_SIDE_FLIP_ENABLED') ??
             file.firstEntryExpensiveSideFlipEnabled ??
             defaults.firstEntryExpensiveSideFlipEnabled,
+        safeModeEnabled:
+            boolFromEnv('SAFE_MODE_ENABLED') ?? file.safeModeEnabled ?? defaults.safeModeEnabled,
+        windowWorstCaseLossStopUsd:
+            (fromEnv('WINDOW_WORST_CASE_LOSS_STOP_USD', parseFloat) as number) ??
+            file.windowWorstCaseLossStopUsd ??
+            defaults.windowWorstCaseLossStopUsd,
+        sessionDrawdownStopUsd:
+            (fromEnv('SESSION_DRAWDOWN_STOP_USD', parseFloat) as number) ??
+            file.sessionDrawdownStopUsd ??
+            defaults.sessionDrawdownStopUsd,
+        deRiskDrawdownStartUsd:
+            (fromEnv('DE_RISK_DRAWDOWN_START_USD', parseFloat) as number) ??
+            file.deRiskDrawdownStartUsd ??
+            defaults.deRiskDrawdownStartUsd,
+        deRiskClipFraction:
+            (fromEnv('DE_RISK_CLIP_FRACTION', parseFloat) as number) ??
+            file.deRiskClipFraction ??
+            defaults.deRiskClipFraction,
+        riskOffWorstCasePnlUsd:
+            (fromEnv('RISK_OFF_WORST_CASE_PNL_USD', parseFloat) as number) ??
+            file.riskOffWorstCasePnlUsd ??
+            defaults.riskOffWorstCasePnlUsd,
+        maxUnmatchedSharesBeforeFreeze:
+            (fromEnv('MAX_UNMATCHED_SHARES_BEFORE_FREEZE', parseFloat) as number) ??
+            file.maxUnmatchedSharesBeforeFreeze ??
+            defaults.maxUnmatchedSharesBeforeFreeze,
+        riskOffBypassHedgeGates:
+            boolFromEnv('RISK_OFF_BYPASS_HEDGE_GATES') ??
+            file.riskOffBypassHedgeGates ??
+            defaults.riskOffBypassHedgeGates,
         fromThirdPurchaseClipMultiplier: file.fromThirdPurchaseClipMultiplier,
         alternateHedgeFromRound: file.alternateHedgeFromRound,
         alternateHedgeClipMinShares: file.alternateHedgeClipMinShares,

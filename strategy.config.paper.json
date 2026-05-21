@@ -24,10 +24,19 @@
   "quietConsole": false,
   "paperStartingBalanceUsd": 4892,
   "predictionBtcGapMinAbsUsd": 30,
+  "maxOneSidedWindowFraction": 0.3,
   "minDualAfterPnlUsd": 0.9,
   "minDualAfterPnlStrictAbove": true,
   "firstEntryExpensiveSideFlipEnabled": false,
   "immediateOppositePairCostMax": 0.97,
   "immediateImpliedPairMinDualAfterPnlUsd": 1.0,
-  "aggressiveDualPnlHedgeEnabled": false
+  "aggressiveDualPnlHedgeEnabled": false,
+  "safeModeEnabled": true,
+  "windowWorstCaseLossStopUsd": 12,
+  "sessionDrawdownStopUsd": 120,
+  "deRiskDrawdownStartUsd": 60,
+  "deRiskClipFraction": 0.5,
+  "riskOffWorstCasePnlUsd": 8,
+  "maxUnmatchedSharesBeforeFreeze": 35,
+  "riskOffBypassHedgeGates": true
 }
