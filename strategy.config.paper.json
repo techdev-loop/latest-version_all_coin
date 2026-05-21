@@ -25,6 +25,7 @@
   "paperStartingBalanceUsd": 4892,
   "predictionBtcGapMinAbsUsd": 30,
   "maxOneSidedWindowFraction": 0.3,
+  "takerWhenDualOutcomeVerified": false,
   "minDualAfterPnlUsd": 0.9,
   "minDualAfterPnlStrictAbove": true,
   "firstEntryExpensiveSideFlipEnabled": false,
@@ -38,5 +39,5 @@
   "deRiskClipFraction": 0.5,
   "riskOffWorstCasePnlUsd": 8,
   "maxUnmatchedSharesBeforeFreeze": 35,
-  "riskOffBypassHedgeGates": true
+  "riskOffBypassHedgeGates": false
 }

@@ -52,7 +52,7 @@
     "alternateHedgeClipMaxShares": 30,
     "dualOutcomeProfitStopUsd": 3,
     "dualOutcomePurchasePriority": true,
-    "takerWhenDualOutcomeVerified": true,
+    "takerWhenDualOutcomeVerified": false,
     "earlyDownMomentumHedgeEnabled": true,
     "earlyDownMomentumAskFloorUsd": 0.43,
     "earlyDownMomentumMinRisingVelocity": 0,

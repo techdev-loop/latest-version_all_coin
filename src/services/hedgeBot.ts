@@ -2928,7 +2928,9 @@ export class HedgeBot {
         const freezeStockAByImbalance =
             enabled && maxUnmatched > 0 && imbalanceShares > maxUnmatched + 1e-9;
         const bypassHedgeGatesInRiskOff =
-            this.config.riskOffBypassHedgeGates !== false && riskOffActive;
+            this.config.liveTrading === true &&
+            this.config.riskOffBypassHedgeGates !== false &&
+            riskOffActive;
         return {
             enabled,
             imbalanceShares,
@@ -5379,8 +5381,11 @@ export class HedgeBot {
                 this.config.stopTradingSecondsBeforeEnd
             ) && diff > 0;
         const useTakerParityAllCaps =
-            this.config.livePreferTakerAllEntries === true && askSideCaps > 0;
+            this.config.liveTrading === true &&
+            this.config.livePreferTakerAllEntries === true &&
+            askSideCaps > 0;
         const useTakerLiveHedgeCaps =
+            this.config.liveTrading === true &&
             askSideCaps > 0 &&
             diff > 0 &&
             requiresMinDualAfterPnlForSimulatedBuy(state, side);
@@ -5661,7 +5666,11 @@ export class HedgeBot {
         /** When imbalanced one-sided and both After PnLs verify at ask, optional FOK @ ask (config). */
         let useTakerDualVerified = false;
         const qEps = 1e-8;
-        if (this.config.takerWhenDualOutcomeVerified && shares > 0) {
+        if (
+            this.config.liveTrading === true &&
+            this.config.takerWhenDualOutcomeVerified &&
+            shares > 0
+        ) {
             const oneSided =
                 (state.qtyYes > qEps && state.qtyNo <= qEps) ||
                 (state.qtyNo > qEps && state.qtyYes <= qEps);
@@ -5685,13 +5694,16 @@ export class HedgeBot {
             ) && diff > 0;
         const askSide = side === 'YES' ? this.liveBestAskYes : this.liveBestAskNo;
         const useTakerParityAll =
-            this.config.livePreferTakerAllEntries === true && askSide > 0;
+            this.config.liveTrading === true &&
+            this.config.livePreferTakerAllEntries === true &&
+            askSide > 0;
         const useTakerLiveHedge =
+            this.config.liveTrading === true &&
             askSide > 0 && diff > 0 && requiresMinDualAfterPnlForSimulatedBuy(state, side);
         const useTaker =
             useTakerParityAll ||
             useTakerLiveHedge ||
-            (mustHedgeLate && askSide > 0) ||
+            (this.config.liveTrading === true && mustHedgeLate && askSide > 0) ||
             (useTakerDualVerified && askSide > 0);
         if (useTakerParityAll) {
             orderReasonCode = `${orderReasonCode}|PARITY_TAKER_ALL`;
