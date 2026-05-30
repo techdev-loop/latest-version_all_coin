@@ -5,6 +5,9 @@
     "scripts": {
         "build": "tsc",
         "start": "npm run build && node dist/index.js",
+        "start:live:1000": "npm run build && node dist/index.js",
+        "start:paper:1000": "npm run build && node dist/index.js",
+        "start:paper:aggressive": "npm run build && node dist/index.js",
         "start:fast": "node dist/index.js",
         "start:original:9001": "node dist/index.js --strategy-profile=original --dashboard-port=9001 --order-history-data-dir=data/original",
         "start:optimized:9002": "node dist/index.js --strategy-profile=optimized --dashboard-port=9002 --order-history-data-dir=data/optimized",

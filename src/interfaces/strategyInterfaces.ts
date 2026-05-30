@@ -375,6 +375,19 @@ export interface StrategyConfig {
     riskOffBypassHedgeGates?: boolean;
 
     /**
+     * Ladder Strategy with Momentum Recovery: 
+     * When true, allows bypassing pair-cost ceilings if trapped on a losing leg, 
+     * using BTC momentum to build a P/L bridge on the winning leg.
+     */
+    useLadderRecoveryMomentum?: boolean;
+    
+    /**
+     * The BTC gap threshold (USD) required to trigger the momentum recovery bridge.
+     * Default 30.
+     */
+    ladderRecoveryBtcGapThresholdUsd?: number;
+
+    /**
      * Token sweep: scan wallet for all ERC-20 tokens at startup and swap
      * eligible ones to USDC via Paraswap. Runs before the trading loop begins.
      */

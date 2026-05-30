@@ -86,6 +86,25 @@ async function main(): Promise<void> {
     const config = loadStrategyConfig();
     configSpinner.succeed(`Config loaded (target pair cost < ${config.targetPairCostMax}, live=${config.liveTrading})`);
 
+    if (config.liveTrading) {
+        console.log('\n*** LIVE TRADING ENABLED — real orders, real funds ***');
+        console.log(
+            `    Window cap $${config.maxPositionPerWindowUsd} | max order $${config.maxSingleOrderUsd ?? 'n/a'} | ` +
+                `session stop -$${config.sessionDrawdownStopUsd ?? 120}`
+        );
+        console.log(
+            '    Confirm: PROXY_WALLET funded, COLLATERAL_TOKEN_ADDRESS=pUSD, dashboard kill switch ready.\n'
+        );
+        if (config.killSwitch) {
+            console.warn('[Bot] killSwitch is ON in config — no orders will be placed until disabled.');
+        }
+        if (config.tokenSweep?.enabled && config.tokenSweep.dryRun !== true) {
+            console.warn(
+                '[Bot] tokenSweep is enabled with dryRun=false — startup may swap wallet tokens. Set tokenSweep.enabled=false for live pilot.'
+            );
+        }
+    }
+
     const clobSpinner = ora('Creating CLOB client...').start();
     const clobClient = await createClobClient(config.liveTrading);
     clobSpinner.succeed('CLOB client ready.');

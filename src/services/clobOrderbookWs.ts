@@ -193,28 +193,29 @@ export class ClobOrderbookWs {
     }
 
     private onMessage(raw: string): void {
-        let msg: {
-            event_type?: string;
-            asset_id?: string;
-            bids?: LevelRow[];
-            asks?: LevelRow[];
-            price_changes?: Array<{ asset_id: string; price: string; size: string; side: string }>;
-        };
+        let parsed: any;
         try {
-            msg = JSON.parse(raw) as typeof msg;
+            parsed = JSON.parse(raw);
         } catch {
             return;
         }
 
-        if (msg.event_type === 'book' && msg.asset_id) {
-            this.setFullBook(msg.asset_id, msg.bids, msg.asks);
-            return;
-        }
-        if (msg.event_type === 'price_change' && Array.isArray(msg.price_changes)) {
-            for (const ch of msg.price_changes) {
-                if (!ch?.asset_id) continue;
-                this.applyPriceChange(ch.asset_id, ch);
+        const handleObj = (msg: any) => {
+            if (msg.bids && msg.asks && msg.asset_id) {
+                this.setFullBook(msg.asset_id, msg.bids, msg.asks);
             }
+            if (Array.isArray(msg.price_changes)) {
+                for (const ch of msg.price_changes) {
+                    if (!ch?.asset_id) continue;
+                    this.applyPriceChange(ch.asset_id, ch);
+                }
+            }
+        };
+
+        if (Array.isArray(parsed)) {
+            parsed.forEach(handleObj);
+        } else {
+            handleObj(parsed);
         }
     }
 

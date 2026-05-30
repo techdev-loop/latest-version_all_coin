@@ -2106,7 +2106,7 @@ function serveHtml(): string {
       z-index: 0;
     }
 
-    .app { position: relative; z-index: 1; max-width: 1100px; margin: 0 auto; padding: 24px 20px; }
+    .app { position: relative; z-index: 1; max-width: 1100px; margin-left: 450px; padding: 24px 20px; }
 
     /* ─── Header ─── */
     .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 28px; flex-wrap: wrap; gap: 12px; }
@@ -2174,6 +2174,7 @@ function serveHtml(): string {
     .grid-3 { grid-template-columns: repeat(3, 1fr); }
 
     @media (max-width: 768px) {
+      .app { margin-left: auto; margin-right: auto; padding-bottom: 350px; }
       .grid-4 { grid-template-columns: repeat(2, 1fr); }
       .grid-3 { grid-template-columns: repeat(2, 1fr); }
     }
@@ -2243,6 +2244,13 @@ function serveHtml(): string {
       width: min(420px, calc(100vw - 24px));
       max-height: min(92vh, 900px);
       overflow-y: auto;
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+    .floating-entry-signal::-webkit-scrollbar {
+      display: none;
+    }
+    .floating-entry-signal {
       background: rgba(12, 18, 34, 0.95);
       border: 1px solid var(--border);
       border-radius: 14px;
@@ -2367,10 +2375,10 @@ function serveHtml(): string {
     .floating-entry-signal.pos-bottom-right { right: 14px; left: auto; top: auto; bottom: 14px; transform: none; }
     @media (max-width: 768px) {
       .floating-entry-signal {
-        top: auto;
-        bottom: 10px;
-        left: 50%;
-        transform: translateX(-50%);
+        top: auto !important;
+        bottom: 10px !important;
+        left: 50% !important;
+        transform: translateX(-50%) !important;
       }
     }
 

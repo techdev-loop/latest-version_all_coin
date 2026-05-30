@@ -104,7 +104,7 @@ export function generateDaySummary(date: string): DaySummary {
             lockedProfit: final.lockedProfit,
             feeBipsAssumption: feeBips,
             estimatedFees: estFees,
-            netProfitEstimate: final.lockedProfit - estFees,
+            netProfitEstimate: final.lockedProfit,
             orderCount,
             failedOrders,
         });

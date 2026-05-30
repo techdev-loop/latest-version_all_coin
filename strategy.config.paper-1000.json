@@ -1,6 +1,6 @@
 {
     "_profile": "paper-1000-safe-pilot",
-    "_notes": "Active config: paper trading, $1000 simulated. Live twin: strategy.config.live-1000.json",
+    "_notes": "Same strategy as strategy.config.live-1000.json but paper mode with $1000 simulated balance.",
     "btcMarketWindowMinutes": 5,
     "targetPairCostMax": 0.975,
     "safetyMargin": 0.970,

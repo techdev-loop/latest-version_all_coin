@@ -450,6 +450,37 @@ export interface EntryRiseSignalResult {
 }
 
 /**
+ * Ladder Strategy with Momentum Recovery:
+ * Calculates the number of shares needed on the winning leg to offset 
+ * the sunk cost of the trapped (losing) leg.
+ * 
+ * Sunk Cost = trapped_qty * avg_trapped_cost
+ * Expected Profit per winning share = 1.00 - winningAsk
+ * Bridge Size = ceil(Sunk Cost / Expected Profit)
+ */
+export function calculateBridgeRecoverySize(
+    state: WindowState,
+    winningSide: 'YES' | 'NO',
+    winningAsk: number
+): number {
+    if (winningAsk >= 0.99 || winningAsk <= 0) return 0;
+    
+    let sunkCost = 0;
+    if (winningSide === 'YES') {
+        // The trapped side is NO
+        sunkCost = state.qtyNo * state.avgNo;
+    } else {
+        // The trapped side is YES
+        sunkCost = state.qtyYes * state.avgYes;
+    }
+
+    if (sunkCost <= 0) return 0;
+
+    const expectedProfitPerShare = 1.00 - winningAsk;
+    return Math.ceil(sunkCost / expectedProfitPerShare);
+}
+
+/**
  * Combine BTC gap (vs window open), relative best-ask rise velocity (YES vs NO), and spread tightness
  * to infer which outcome’s ask is more likely to keep rising. Null side = inconclusive composite score.
  * Used by {@link predictLikelyRisingSide} and pair-ladder equal/initiation picks regardless of `entryRiseSignalEnabled`.
@@ -726,6 +757,8 @@ export function clampBuySizeForSimulatedGates(
         oppositeBidForFirstLegGate?: number;
         /** How the simulated fill on `side` is priced for fees (maker = notional only in model). */
         simulatedFillLiquidity?: OrderLiquidityRole;
+        /** Ladder Recovery: When true, explicitly skips the pairCost / enforceDual gates so the P/L bridge can be built. */
+        ladderRecoveryBypass?: boolean;
     }
 ): number {
     const minSize = Math.max(1, Math.floor(config.orderMinSize || 1));
@@ -784,6 +817,11 @@ export function clampBuySizeForSimulatedGates(
             s--;
             continue;
         }
+
+        if (config.useLadderRecoveryMomentum && opts?.ladderRecoveryBypass) {
+            return s;
+        }
+
         const addedCost = buyBinaryOutcomeLegUsd(s, price, liq, feeBips, feeScalar);
         const commFill = takerCommissionUsdForBinaryBuy(s, price, liq, feeBips, feeScalar);
         const newState = updateWindowStateFromFill(state, side, s, addedCost, {
@@ -1099,7 +1137,7 @@ export function buildFinalOneSidedHedgeDecision(
                 strictAbove
             ) &&
             newState.pairCost < 1.0 - 1e-9 &&
-            newState.pairCost <= pairCeil + 1e-9
+            (ctx?.bypassFinalTimeWindow ? true : newState.pairCost <= pairCeil + 1e-9)
         ) {
             const { newPairCost } = simulateState(state, side, size, price, config, 'TAKER');
             const tokenId = side === 'YES' ? bookYes.tokenId : bookNo.tokenId;
@@ -1124,7 +1162,7 @@ export function buildFinalOneSidedHedgeDecision(
         tokenId: '',
         price: 0,
         size: 0,
-        reason: `Final hedge: no size from ${sharesTarget}→${floorClip} keeps both P/L ex-commission ≥ $${minD.toFixed(2)}, pair < 1, pair ≤ $${pairCeil.toFixed(4)} (all-in @ ask)${
+        reason: `Final hedge: no size from ${sharesTarget}→${floorClip} keeps both P/L ex-commission ≥ $${minD.toFixed(2)}, pair < 1${ctx?.bypassFinalTimeWindow ? '' : `, pair ≤ $${pairCeil.toFixed(4)}`} (all-in @ ask)${
             pairLadderOn ? `, clip ≥ ${floorClip}` : ''
         }`,
     };

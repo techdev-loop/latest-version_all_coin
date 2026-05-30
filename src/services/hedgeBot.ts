@@ -67,6 +67,7 @@ import {
     sharesToReachOutcomeAfterPnlTarget,
     predictLikelyRisingSide,
     evaluateLikelyRisingSideSignal,
+    calculateBridgeRecoverySize,
     type EntryRiseSignalInput,
 } from './hedgeStrategy';
 import {
@@ -3098,6 +3099,32 @@ export class HedgeBot {
                 const forcedSide: 'YES' | 'NO' = oneSidedYes ? 'NO' : 'YES';
                 const forcedAsk = forcedSide === 'YES' ? (bookYes.bestAsk ?? 0) : (bookNo.bestAsk ?? 0);
                 const target = Math.floor(oneSidedYes ? state.qtyYes : state.qtyNo);
+
+                // CRITICAL GUARD: Never execute a forced hedge that results in pair cost >= 1.00.
+                // Paying more than $1.00 per pair guarantees a loss worse than letting it expire.
+                // Calculate the effective taker cost (with fee scalar) before committing.
+                const feeScalar = this.config.binaryOutcomeTakerFeeScalar ?? 0;
+                const takerEffectiveCost = forcedAsk * (1 + feeScalar);
+                const trappedAvgCost = oneSidedYes
+                    ? (state.qtyYes > zRisk ? state.costYes / state.qtyYes : 0)
+                    : (state.qtyNo > zRisk ? state.costNo / state.qtyNo : 0);
+                const projectedPairCost = trappedAvgCost + takerEffectiveCost;
+
+                if (projectedPairCost >= 1.0) {
+                    // Hedge would guarantee a loss — skip it and let position expire naturally.
+                    // A one-sided expiry has a 50% chance of profit; a pair cost > 1.00 is 100% loss.
+                    updateDashboardState({
+                        ...this.getDashboardExtras(),
+                        marketSlug: market.slug,
+                        windowEndIso: market.endDateIso,
+                        consecutiveFailures: this.riskState.consecutiveOrderFailures,
+                        pendingOrders: 0,
+                        lastTick: new Date().toISOString(),
+                        message: `HOLD: risk-off bypass skipped — projected pair cost $${projectedPairCost.toFixed(4)} ≥ $1.00 (ask $${forcedAsk.toFixed(2)} + ${(feeScalar*100).toFixed(1)}% fee > trapped avg $${trappedAvgCost.toFixed(2)}). Letting position expire naturally.`,
+                    });
+                    return true;
+                }
+
                 const forcedShares = clampBuySizeForSimulatedGates(
                     state,
                     forcedSide,
@@ -3115,7 +3142,7 @@ export class HedgeBot {
                         tokenId: forcedSide === 'YES' ? market.yesTokenId : market.noTokenId,
                         price: forcedAsk,
                         size: forcedShares,
-                        reason: `Risk-off forced hedge bypass`,
+                        reason: `Risk-off forced hedge bypass (projected pair cost $${projectedPairCost.toFixed(4)})`,
                     };
                 }
             }
@@ -4627,8 +4654,7 @@ export class HedgeBot {
                 this.riskState,
                 market.windowDurationSec,
                 maxOneSidedFrac
-            ) &&
-            secondsLeft > (this.config.finalOneSidedHedgeSeconds ?? 30)
+            )
         ) {
             qlog(q, `[Bot] One-sided too long (>${((maxOneSidedFrac ?? 0.6) * 100).toFixed(0)}% of window) — forcing taker hedge`);
             const forceHandled = await this.tryExecuteOneSidedFokHedge(
@@ -4637,7 +4663,7 @@ export class HedgeBot {
                 secondsLeft,
                 q,
                 'forced',
-                { riskOffBypassGates: safeRisk.bypassHedgeGatesInRiskOff }
+                { riskOffBypassGates: true }
             );
             if (forceHandled) return;
         }
@@ -4687,13 +4713,20 @@ export class HedgeBot {
                 q
             );
             if (finalMomentumTargetHandled) return;
+        }
 
+        // ── Emergency hedges: NEVER blocked by pairLadderSkipAuxiliary ──
+        // These are last-resort safety nets that MUST run even when the pair
+        // ladder is imbalanced, otherwise the bot expires one-sided and loses
+        // the entire position ($113 on 130 shares).
+        {
             const momentumHedgeHandled = await this.tryExecuteOneSidedFokHedge(
                 market,
                 state,
                 secondsLeft,
                 q,
-                'momentum'
+                'momentum',
+                { riskOffBypassGates: true }
             );
             if (momentumHedgeHandled) return;
 
@@ -4702,7 +4735,8 @@ export class HedgeBot {
                 state,
                 secondsLeft,
                 q,
-                'final'
+                'final',
+                { riskOffBypassGates: true }
             );
             if (finalHedgeHandled) return;
         }
@@ -4933,8 +4967,44 @@ export class HedgeBot {
             pairImbForSkip === 0;
 
         let skewDecision: StrategyDecision | null = null;
+
+        // --- Ladder Strategy with Momentum Recovery ---
+        if (this.config.useLadderRecoveryMomentum && books !== null) {
+            const zRisk = 1e-8;
+            const oneSidedYes = state.qtyYes > zRisk && state.qtyNo <= zRisk;
+            const oneSidedNo = state.qtyNo > zRisk && state.qtyYes <= zRisk;
+            if (oneSidedYes || oneSidedNo) {
+                const trappedSide = oneSidedYes ? 'YES' : 'NO';
+                const winningSide = trappedSide === 'YES' ? 'NO' : 'YES';
+                const winningAsk = winningSide === 'YES' ? this.liveBestAskYes : this.liveBestAskNo;
+                const trappedAvg = trappedSide === 'YES' ? state.avgYes : state.avgNo;
+                
+                const pairCeil = pairCostCeiling(this.config);
+                const gapLimit = this.config.ladderRecoveryBtcGapThresholdUsd ?? 30;
+                const btcMomentumTriggers = 
+                    (trappedSide === 'YES' && btcDelta !== null && btcDelta <= -gapLimit) ||
+                    (trappedSide === 'NO' && btcDelta !== null && btcDelta >= gapLimit);
+
+                if (trappedAvg + winningAsk > pairCeil && btcMomentumTriggers) {
+                    const requiredBridgeSize = calculateBridgeRecoverySize(state, winningSide, winningAsk);
+                    if (requiredBridgeSize > 0) {
+                        const maxSharesPerClip = this.config.maxClipShares ?? 35;
+                        const clipSize = Math.min(requiredBridgeSize, maxSharesPerClip);
+                        
+                        skewDecision = {
+                            action: winningSide === 'YES' ? 'BUY_YES' : 'BUY_NO',
+                            tokenId: winningSide === 'YES' ? market.yesTokenId : market.noTokenId,
+                            price: winningAsk,
+                            size: clipSize,
+                            reason: `LADDER_RECOVERY|trapped_${trappedSide}|target_${requiredBridgeSize}sh`,
+                        };
+                    }
+                }
+            }
+        }
+
         const skewOn = this.config.directionalSkewEnabled !== false;
-        if (books !== null && skewOn && !pairBalancedBook) {
+        if (books !== null && skewOn && !pairBalancedBook && skewDecision === null) {
             skewDecision = buildDirectionalSkewInventoryDecision(
                 this.config,
                 state,
@@ -4962,7 +5032,14 @@ export class HedgeBot {
 
         const pairHedgeMode = pairLadderSkipAuxiliary;
 
-        if (pairHedgeMode) {
+        if (skewDecision !== null && skewDecision.reason.includes('LADDER_RECOVERY')) {
+            side = skewDecision.action === 'BUY_YES' ? 'YES' : 'NO';
+            sideLabel = side === 'YES' ? 'Up' : 'Down';
+            currentBid = skewDecision.price;
+            tokenId = side === 'YES' ? market.yesTokenId : market.noTokenId;
+            shares = skewDecision.size;
+            orderReasonCode = skewDecision.reason;
+        } else if (pairHedgeMode) {
             const lighter = this.pairLighterHedgeSide(state);
             if (!lighter) {
                 this.holdsThisWindow++;

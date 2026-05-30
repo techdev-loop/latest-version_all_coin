@@ -95,6 +95,8 @@ const defaults: StrategyConfig = {
     riskOffWorstCasePnlUsd: 8,
     maxUnmatchedSharesBeforeFreeze: 35,
     riskOffBypassHedgeGates: true,
+    useLadderRecoveryMomentum: false,
+    ladderRecoveryBtcGapThresholdUsd: 30,
 };
 
 /** Env set (any non-empty value) wins over JSON; unset means “use file default”. */
@@ -454,6 +456,14 @@ export function loadStrategyConfig(): StrategyConfig {
             file.immediateImpliedPairMinDualAfterPnlUsd ??
             defaults.immediateImpliedPairMinDualAfterPnlUsd,
         maxOneSidedWindowFraction: file.maxOneSidedWindowFraction,
+        useLadderRecoveryMomentum:
+            boolFromEnv('USE_LADDER_RECOVERY_MOMENTUM') ??
+            file.useLadderRecoveryMomentum ??
+            defaults.useLadderRecoveryMomentum,
+        ladderRecoveryBtcGapThresholdUsd:
+            (fromEnv('LADDER_RECOVERY_BTC_GAP_THRESHOLD_USD', parseFloat) as number) ??
+            file.ladderRecoveryBtcGapThresholdUsd ??
+            defaults.ladderRecoveryBtcGapThresholdUsd,
         tokenSweep: file.tokenSweep,
     };
     return config;

@@ -183,11 +183,12 @@ export function recordWindowEnd(params: {
         winnerSide === 'NO' ? params.qtyNo :
         Math.min(params.qtyYes, params.qtyNo);
 
-    // Taker fees only (Polymarket: fee = C×feeRate×p×(1−p)); makers = 0. Paid at settlement in paper mode.
-    const realizedNet = payoutReceived - params.totalSpentUsd - params.feeEstimate;
+    // totalSpentUsd uses all-in cost which already includes taker fees (via binaryOutcomeTakerFeeScalar).
+    // Subtracting feeEstimate again double-counts fees.
+    const realizedNet = payoutReceived - params.totalSpentUsd;
 
     simulatedBalanceUsd += payoutReceived;
-    simulatedBalanceUsd -= params.feeEstimate;
+    // simulatedBalanceUsd already deducted the all-in cost per fill, so do not deduct feeEstimate again.
 
     // Backfill per-order realized P/L (no fees) for UI clarity
     const resolvedOrders = params.ordersInWindow.map(o => {
@@ -250,7 +251,7 @@ export function correctLastUnknownWindowSettlement(
     const delta = newPayout - oldPayout;
     simulatedBalanceUsd += delta;
 
-    const newNet = newPayout - last.totalSpentUsd - last.feeEstimate;
+    const newNet = newPayout - last.totalSpentUsd;
     const newOrders = last.orders.map((o) => ({
         ...o,
         winnerSide: winner,
